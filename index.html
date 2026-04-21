@@ -1,0 +1,2981 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Simulazione ISO/TC 20/SC 16 — UAS · ITTL Classe 3ª</title>
+
+<!-- React 18 + Babel Standalone -->
+<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+<style>
+  html, body { margin: 0; padding: 0; }
+  #root { min-height: 100vh; }
+  .boot-loading {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    display: flex; align-items: center; justify-content: center;
+    min-height: 100vh; color: #5a5a5a; font-size: 14px;
+    background: #f5f2eb;
+  }
+</style>
+</head>
+<body>
+<div id="root"><div class="boot-loading">Caricamento applicazione...</div></div>
+
+<script type="text/babel" data-type="module">
+const { useState, useEffect, useCallback, useRef } = React;
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CONFIGURAZIONE BACKEND
+// ═══════════════════════════════════════════════════════════════════════════
+// URL del deployment Apps Script. Sostituire dopo il deploy del backend.
+// Istruzioni complete nel file `ISTRUZIONI_SETUP.md`.
+const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxk8mChu3y_ytmWMeOtFnuQLrTrBGq_R5PV6yf137ik7RAGW4BHI2cqPPmYONXJRBouoQ/exec";
+
+// Se true, l'app funziona in modalità "solo locale" senza backend: utile per
+// testare l'interfaccia. In questa modalità non c'è persistenza condivisa.
+const MODALITA_OFFLINE_TEST = APPS_SCRIPT_URL.indexOf("INSERIRE") >= 0;
+
+// ═══════════════════════════════════════════════════════════════════════════
+// COSTANTI DI DOMINIO
+// ═══════════════════════════════════════════════════════════════════════════
+const PAESI = [
+  { id: "IT", nome: "Italia",      ente: "UNI",   emoji: "🇮🇹" },
+  { id: "US", nome: "USA",         ente: "ANSI",  emoji: "🇺🇸" },
+  { id: "DE", nome: "Germania",    ente: "DIN",   emoji: "🇩🇪" },
+  { id: "FR", nome: "Francia",     ente: "AFNOR", emoji: "🇫🇷" },
+  { id: "UK", nome: "Regno Unito", ente: "BSI",   emoji: "🇬🇧" },
+  { id: "JP", nome: "Giappone",    ente: "JSA",   emoji: "🇯🇵" },
+  { id: "CA", nome: "Canada",      ente: "SCC",   emoji: "🇨🇦" },
+];
+
+const WG_DATA = {
+  1: {
+    titolo: "Remote ID",
+    sottotitolo: "Cosa trasmette il drone?",
+    colore: "#1a4a8a",
+    domandaCentrale: "Quali informazioni deve inviare obbligatoriamente un drone in volo?",
+    conflitto: "Trasmettere o no la posizione dell'operatore a terra?",
+    sezioni: [
+      { id: "contesto", titolo: "Il contesto", tipo: "info",
+        contenuto: "Il Remote ID è il sistema che permette a chiunque — agenti di polizia, altri piloti, cittadini — di sapere chi è il drone che vola sopra di loro, chi lo pilota e da dove è partito.\n\nIl Remote ID nasce per risolvere un problema concreto: se un drone vola in modo non autorizzato sopra un aeroporto, le autorità non riescono a identificare chi lo sta pilotando.\n\nLa norma ISO vuole creare uno standard internazionale armonizzato: le regole europee (Reg. UE 2019/945) e americane (FAA Remote ID Rule) sono simili ma non identiche." },
+      { id: "ricerca", titolo: "Fonti per la ricerca", tipo: "fonti",
+        fonti: [
+          { testo: "Reg. UE 2019/945, Allegato Parte 2 — Requisiti Remote ID", url: "https://eur-lex.europa.eu/legal-content/IT/TXT/?uri=CELEX%3A32019R0945" },
+          { testo: "FAA Remote ID Final Rule — Summary", url: "https://www.faa.gov/uas/getting_started/remote_id" },
+          { testo: "ENAC — Regolamento SAPR, sezione identificazione a distanza", url: "https://www.enac.gov.it/sicurezza-aerea/droni" },
+        ] },
+      { id: "domande", titolo: "Guida alla riflessione", tipo: "domande",
+        domande: [
+          "Il tuo paese ha normative sulla privacy (es. GDPR in Europa) che potrebbero limitare i dati trasmessi?",
+          "Chi deve poter ricevere il segnale Remote ID? Solo le autorità o chiunque nel raggio di trasmissione?",
+          "Cosa succede se il segnale viene intercettato da un soggetto malintenzionato?",
+          "Trasmettere la posizione dell'operatore a terra: è necessario per identificare il responsabile di un incidente?",
+          "Come si bilancia la sicurezza aerea con il diritto alla privacy dell'operatore?",
+        ] },
+      { id: "conflitto", titolo: "Il conflitto da affrontare in plenaria", tipo: "conflitto",
+        testo: "La trasmissione della posizione dell'operatore a terra è il dato più discusso.\n\n• Chi è a FAVORE sostiene che senza sapere dove si trova il pilota, è impossibile identificarlo fisicamente in caso di incidente.\n\n• Chi è CONTRARIO sostiene che trasmettere in modo continuo la posizione di una persona è un dato personale sensibile e viola il diritto alla privacy.",
+        domandaIniezione: "Germania, se la norma non richiede la posizione dell'operatore, come si identifica fisicamente il responsabile di un incidente in area urbana?" },
+    ],
+  },
+  2: {
+    titolo: "Limiti operativi",
+    sottotitolo: "Dove e con quali limiti può volare?",
+    colore: "#8a3a1a",
+    domandaCentrale: "Da quale peso in su si applica la norma? Ci sono limiti di zona o altitudine?",
+    conflitto: "Soglia minima di peso: 250 g o 500 g?",
+    sezioni: [
+      { id: "contesto", titolo: "Il contesto", tipo: "info",
+        contenuto: "In Europa, il Regolamento UE 2019/945 divide i droni in categorie in base al peso (C0, C1, C2, C3, C4). I droni sotto i 250 grammi (categoria C0) hanno pochissimi obblighi perché si ritiene che il rischio di danni seri sia basso.\n\nLa NWIP propone che la norma ISO si applichi ai droni da 250 g in su. Non tutti i paesi sono d'accordo: alcuni vogliono alzare la soglia a 500 g per semplificare la vita ai produttori di droni ricreativi leggeri; altri vogliono mantenerla a 250 g per garantire maggiore sicurezza.\n\nOltre al peso, esistono altri limiti operativi importanti: l'altitudine massima, le zone geografiche permesse, gli orari di volo." },
+      { id: "ricerca", titolo: "Fonti per la ricerca", tipo: "fonti",
+        fonti: [
+          { testo: "Reg. UE 2019/945 — categorie C0/C1/C2/C3 con requisiti per peso", url: "https://eur-lex.europa.eu/legal-content/IT/TXT/?uri=CELEX%3A32019R0945" },
+          { testo: "ENAC — categorie operative droni: Open, Specific, Certified", url: "https://www.enac.gov.it/sicurezza-aerea/droni" },
+          { testo: "FAA — tabella pesi e categorie droni consumer", url: "https://www.faa.gov/uas" },
+        ] },
+      { id: "domande", titolo: "Guida alla riflessione", tipo: "domande",
+        domande: [
+          "Il tuo paese ha una grande industria di droni consumer leggeri? Come influenza la sua posizione sulla soglia?",
+          "Un drone da 300 g che consegna farmaci in città: deve essere coperto dalla norma?",
+          "Le città del tuo paese sono molto dense? Come influenza i limiti di altitudine?",
+          "Una soglia alta (500 g) semplifica le regole, ma chi rimane escluso? È un problema?",
+          "I limiti devono essere uguali di giorno e di notte?",
+        ] },
+      { id: "conflitto", titolo: "Il conflitto da affrontare in plenaria", tipo: "conflitto",
+        testo: "La soglia di peso minima è il conflitto più politico di questo WG.\n\n• 250 grammi è il limite attuale in Europa (EASA). Un drone da 300 g in città è soggetto a tutte le regole.\n\n• 500 grammi escluderebbe dalla norma una parte importante del mercato consumer ricreativo. Questo semplifica la vita ai piccoli produttori ma riduce la copertura della norma.",
+        domandaIniezione: "Italia, se la soglia sale a 500 g, un drone da 300 g che consegna farmaci in città non è coperto dalla norma. La delegazione ritiene questo accettabile?" },
+    ],
+  },
+  3: {
+    titolo: "Certificazione",
+    sottotitolo: "Chi può pilotarlo e chi risponde?",
+    colore: "#1a6b3a",
+    domandaCentrale: "Chi certifica la competenza dell'operatore e chi è responsabile in caso di danno?",
+    conflitto: "Esame obbligatorio anche per uso ricreativo?",
+    sezioni: [
+      { id: "contesto", titolo: "Il contesto", tipo: "info",
+        contenuto: "In Europa il sistema EASA divide le operazioni in tre categorie: Open (basso rischio, nessun'autorizzazione), Specific (rischio medio, serve autorizzazione), Certified (alto rischio, certificazione completa).\n\nPer la categoria Open, il pilota deve completare un corso online e superare un esame teorico online. Per operazioni Specific e Certified i requisiti sono più stringenti.\n\nNegli USA la FAA richiede il superamento del Part 107 Knowledge Test per qualsiasi uso commerciale, mentre per uso ricreativo basta registrare il drone e completare un corso online." },
+      { id: "ricerca", titolo: "Fonti per la ricerca", tipo: "fonti",
+        fonti: [
+          { testo: "ENAC — patente pilota droni: test A1/A3 e A2", url: "https://www.enac.gov.it/sicurezza-aerea/droni" },
+          { testo: "EASA — categorie Open/Specific/Certified", url: "https://www.easa.europa.eu/en/domains/civil-drones" },
+          { testo: "FAA — Part 107 Remote Pilot Certificate", url: "https://www.faa.gov/uas/commercial_operators" },
+        ] },
+      { id: "domande", titolo: "Guida alla riflessione", tipo: "domande",
+        domande: [
+          "Per guidare un'automobile serve la patente anche se usi la macchina solo nel weekend. Perché per i droni dovrebbe essere diverso?",
+          "Chi è responsabile se un drone ricreativo cade su una persona? Il pilota, il produttore, o entrambi?",
+          "Un esame obbligatorio per i piloti ricreativi: è proporzionato al rischio reale?",
+          "Il tuo paese tende a regolamentare molto o poco le attività del tempo libero?",
+          "Come si dimostra in tribunale che un pilota ricreativo conosceva le regole prima di un incidente?",
+        ] },
+      { id: "conflitto", titolo: "Il conflitto da affrontare in plenaria", tipo: "conflitto",
+        testo: "La domanda più divisiva: deve esistere un requisito di competenza anche per chi pilota un drone per hobby?\n\n• Chi è a FAVORE sostiene che un drone ricreativo da 400 g cadendo può fare danni seri, e che «hobby» non significa «senza responsabilità».\n\n• Chi è CONTRARIO sostiene che imporre un esame anche per uso hobbistico è eccessivamente burocratico, scoraggia l'uso ricreativo e non è proporzionato al rischio reale.",
+        domandaIniezione: "Canada, se non c'è esame per i piloti ricreativi, come si dimostra in tribunale che il pilota conosceva le regole prima di causare un incidente?" },
+    ],
+  },
+  4: {
+    titolo: "Campo di applicazione",
+    sottotitolo: "A chi si applica davvero? + Delegato Capo",
+    colore: "#5a1a8a",
+    domandaCentrale: "Vale uguale in città e campagna, per uso commerciale e ricreativo?",
+    conflitto: "Regole diverse per area urbana e area rurale?",
+    sezioni: [
+      { id: "contesto", titolo: "Il contesto", tipo: "info",
+        contenuto: "Il campo di applicazione (scope) è la sezione 1 di qualsiasi norma ISO ed è la più importante: definisce esattamente i confini di applicazione.\n\nLa NWIP propone che la norma si applichi ai droni con peso tra 250 g e 25 kg in spazio aereo civile non segregato, sia per uso commerciale sia per uso ricreativo avanzato.\n\nLo studente del WG 4 è anche Delegato Capo del proprio paese: deve raccogliere le posizioni dei tre compagni (WG 1, 2, 3) e portare il voto ufficiale del paese in plenaria." },
+      { id: "ricerca", titolo: "Fonti per la ricerca", tipo: "fonti",
+        fonti: [
+          { testo: "Reg. UE 2019/945 — Art. 1, campo di applicazione", url: "https://eur-lex.europa.eu/legal-content/IT/TXT/?uri=CELEX%3A32019R0945" },
+          { testo: "EASA — mappa zone geografiche UAS", url: "https://www.easa.europa.eu/en/domains/civil-drones/drones-regulatory-framework" },
+          { testo: "UNI — Ente Italiano di Normazione, materiali introduttivi", url: "https://www.uni.com" },
+        ] },
+      { id: "domande", titolo: "Guida alla riflessione", tipo: "domande",
+        domande: [
+          "Volare sopra una folla è un rischio completamente diverso dal volare su campi agricoli. La norma deve riflettere questa differenza?",
+          "Chi decide dove finisce la città e inizia la campagna? La definizione è uguale in tutto il mondo?",
+          "Il tuo paese ha grandi spazi rurali o è prevalentemente urbanizzato? Come influenza la posizione?",
+          "Una norma con due regimi (urbano/rurale) è più precisa, ma è anche più difficile da applicare. Come si bilanciano le due esigenze?",
+          "Come Delegato Capo: le posizioni dei tuoi tre compagni sono coerenti tra loro? Ci sono contraddizioni interne alla delegazione?",
+        ] },
+      { id: "conflitto", titolo: "Il conflitto da affrontare in plenaria", tipo: "conflitto",
+        testo: "La domanda centrale: la norma deve distinguere tra volo in città e volo in campagna?\n\n• Chi è a FAVORE della distinzione (es. Giappone, Germania) sostiene che volare sopra una folla è un rischio completamente diverso dal volare su campi agricoli.\n\n• Chi è CONTRARIO (es. USA, Canada) sostiene che una norma con due regimi diversi è impossibile da applicare: chi decide dove finisce la città e inizia la campagna?",
+        domandaIniezione: "Giappone, se approvate regole diverse per le città, chi definisce i confini di un'area urbana? La definizione è uguale in tutto il mondo?" },
+    ],
+  },
+};
+
+const GLOSSARIO = [
+  { termine: "UAS", def: "Unmanned Aircraft System — sistema completo composto dal drone, dal sistema di controllo a terra e dal collegamento dati." },
+  { termine: "MTOW", def: "Maximum Take-Off Weight — peso massimo al decollo. È il parametro principale per classificare i droni nelle normative." },
+  { termine: "Remote ID", def: "Sistema che trasmette in modo continuo dati identificativi del drone durante il volo (posizione, ID, punto di decollo)." },
+  { termine: "VLOS", def: "Visual Line of Sight — il drone rimane visibile a occhio nudo dall'operatore per tutta la durata del volo." },
+  { termine: "BVLOS", def: "Beyond Visual Line of Sight — il drone supera la linea visiva diretta dell'operatore." },
+  { termine: "P-member", def: "Paese che partecipa attivamente ai lavori di un TC ISO con diritto di voto." },
+  { termine: "O-member", def: "Paese che segue i lavori di un TC/SC senza diritto di voto." },
+  { termine: "NWIP", def: "New Work Item Proposal — proposta formale di avviare un nuovo lavoro normativo ISO." },
+  { termine: "WD", def: "Working Draft — prima bozza tecnica interna al WG, non soggetta a voto formale." },
+  { termine: "CD", def: "Committee Draft — bozza condivisa con tutti i P-member del TC/SC per commenti formali." },
+  { termine: "DIS", def: "Draft International Standard — prima bozza soggetta a inchiesta pubblica internazionale e voto formale." },
+  { termine: "FDIS", def: "Final Draft International Standard — testo definitivo. Solo voto A o D, nessuna modifica sostanziale ammessa." },
+  { termine: "IS", def: "International Standard — norma ISO pubblicata. Riesaminata ogni 5 anni." },
+  { termine: "A — Approve", def: "Il paese approva la proposta senza condizioni. Vale come voto favorevole." },
+  { termine: "AC — Approve with Comments", def: "Il paese approva ma segnala commenti tecnici. Vale come voto favorevole." },
+  { termine: "D — Disapprove", def: "Il paese si oppone formalmente. Deve fornire motivazione tecnica scritta." },
+  { termine: "AB — Abstain", def: "Il paese si astiene. Non partecipa al calcolo delle soglie." },
+  { termine: "EASA", def: "European Union Aviation Safety Agency — agenzia UE che emana regolamenti vincolanti per l'aviazione civile." },
+  { termine: "FAA", def: "Federal Aviation Administration — autorità dell'aviazione civile degli Stati Uniti." },
+  { termine: "ENAC", def: "Ente Nazionale per l'Aviazione Civile — autorità dell'aviazione civile italiana." },
+  { termine: "TC 20", def: "Technical Committee 20 — comitato tecnico ISO per aeromobili e veicoli spaziali, fondato nel 1947." },
+  { termine: "SC 16", def: "Subcommittee 16 del TC 20 — sottocomitato dedicato agli aeromobili senza pilota a bordo (UAS)." },
+];
+
+// Fasi cronometrate della plenaria (secondo guida docente: fasi C1–C5)
+const FASI_PLENARIA = [
+  { id: "C1", nome: "Apertura",                 durataMin: 10, descrizione: "Raccolta schede, apertura formale, verifica quorum" },
+  { id: "C2", nome: "Presentazione WG",         durataMin: 28, descrizione: "4 WG × 4 minuti + 12 min buffer per note" },
+  { id: "C3", nome: "Voti preliminari",         durataMin: 21, descrizione: "Ogni Delegato Capo presenta voto e commenti (3 min ciascuno)" },
+  { id: "C4", nome: "Dibattito tecnico",        durataMin: 25, descrizione: "Discussione aperta sui 4 conflitti intenzionali" },
+  { id: "C5", nome: "Votazione finale",         durataMin: 10, descrizione: "Appello nominale, registrazione voto finale" },
+  { id: "C6", nome: "Debriefing",               durataMin: 10, descrizione: "Riflessione guidata e sondaggio di uscita" },
+];
+
+const DOMANDE_DEBRIEFING = [
+  { id: "cambio", tipo: "chiusa",
+    domanda: "Hai cambiato la tua posizione tra il voto preliminare e il voto finale?",
+    opzioni: ["Sì, ho cambiato voto", "No, stesso voto", "No, ma stavo per farlo"] },
+  { id: "domanda1", tipo: "aperta",
+    domanda: "Il tuo paese ha difeso una posizione che non condividevi personalmente? Cosa è stato più difficile?" },
+  { id: "domanda2", tipo: "aperta",
+    domanda: "Un piccolo produttore italiano di droni: preferisce che esista questa norma o no? Perché?" },
+];
+
+// ═══════════════════════════════════════════════════════════════════════════
+// UTILITY: CALCOLO VOTI ISO
+// ═══════════════════════════════════════════════════════════════════════════
+function calcVoti(voti) {
+  const vals = Object.values(voti).filter(function(v) { return !!v; });
+  const A  = vals.filter(function(v) { return v === "A"; }).length;
+  const AC = vals.filter(function(v) { return v === "AC"; }).length;
+  const D  = vals.filter(function(v) { return v === "D"; }).length;
+  const AB = vals.filter(function(v) { return v === "AB"; }).length;
+  const espressi = A + AC + D;
+  const totali = espressi + AB;
+  const favorevoli = espressi > 0 ? ((A + AC) / espressi) : 0;
+  const contrari   = espressi > 0 ? (D / espressi) : 0;
+  const quorum   = totali >= 5;
+  const sogFav   = favorevoli >= 2 / 3;
+  const sogContr = contrari <= 0.25;
+  const approvata = quorum && sogFav && sogContr && espressi > 0;
+  return { A, AC, D, AB, espressi, totali, favorevoli, contrari, quorum, sogFav, sogContr, approvata };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// API CLIENT — comunicazione con il backend Apps Script
+// ═══════════════════════════════════════════════════════════════════════════
+// Usa fetch con modalità "no-cors" non praticabile (risposta opaca):
+// Apps Script restituisce JSON con CORS abilitato in modalità App Web.
+// Se il backend non è configurato, l'app funziona in modalità offline con un
+// localStorage di emergenza (solo per lo sviluppo).
+
+async function apiCall(action, payload) {
+  if (MODALITA_OFFLINE_TEST) {
+    // Fallback locale: simula le chiamate più comuni per test offline
+    return apiOffline(action, payload || {});
+  }
+  try {
+    const url = APPS_SCRIPT_URL + "?action=" + encodeURIComponent(action);
+    // Inietta automaticamente la password docente (se presente) in ogni richiesta.
+    // Così il backend può verificare le operazioni riservate senza logica ad hoc
+    // in ogni punto del frontend.
+    const finalPayload = { ...(payload || {}) };
+    try {
+      const pwd = sessionStorage.getItem(STORAGE_DOCENTE_PWD);
+      if (pwd && !finalPayload.docenteCode) finalPayload.docenteCode = pwd;
+    } catch (e) {}
+    const res = await fetch(url, {
+      method: "POST",
+      redirect: "follow",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify(finalPayload),
+    });
+    const text = await res.text();
+    try { return JSON.parse(text); }
+    catch (e) { return { ok: false, errore: "Risposta non valida dal backend: " + text.slice(0, 200) }; }
+  } catch (err) {
+    return { ok: false, errore: "Errore di rete: " + err.message };
+  }
+}
+
+// Fallback locale per test senza backend
+const OFF_KEY_STUD = "iso_offline_studenti";
+const OFF_KEY_VOTI = "iso_offline_voti";
+const OFF_KEY_INTR = "iso_offline_interventi";
+const OFF_KEY_DBRF = "iso_offline_debriefing";
+const OFF_KEY_ARCH = "iso_offline_archivio";
+function offRead(k) { try { return JSON.parse(localStorage.getItem(k) || "[]"); } catch(e) { return []; } }
+function offWrite(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch(e) {} }
+
+async function apiOffline(action, p) {
+  const st = offRead(OFF_KEY_STUD);
+  const voti = offRead(OFF_KEY_VOTI);
+  switch (action) {
+    case "ping": return { ok: true, email: "offline@test.local", ruolo: "docente" };
+    case "verifica_docente": return { ok: true, autorizzato: true, email: "offline@test.local" };
+    case "slot_liberi": {
+      const occ = {}; PAESI.forEach(function(x) { occ[x.id] = []; });
+      st.forEach(function(s) { if (s.paese) occ[s.paese].push(parseInt(s.wg)); });
+      const lib = {};
+      PAESI.forEach(function(x) { lib[x.id] = [1,2,3,4].filter(function(w) { return occ[x.id].indexOf(w) < 0; }); });
+      return { ok: true, slot: lib };
+    }
+    case "registra_studente": {
+      const id = "iso_st_" + Date.now();
+      const s = { ...p, id, registrato: new Date().toISOString(), sezioniVisitate: [], completato: false, ballotVoto: "", sintesiPosizione: "" };
+      s.wg = parseInt(s.wg);
+      s.isDelegatoCapo = s.wg === 4;
+      st.push(s); offWrite(OFF_KEY_STUD, st);
+      return { ok: true, studente: s };
+    }
+    case "get_studente": {
+      const s = st.filter(function(x) { return x.id === p.id; })[0];
+      return s ? { ok: true, studente: s } : { ok: false, errore: "Non trovato" };
+    }
+    case "aggiorna_studente": {
+      const idx = st.findIndex(function(x) { return x.id === p.id; });
+      if (idx < 0) return { ok: false, errore: "Non trovato" };
+      st[idx] = { ...st[idx], ...p };
+      offWrite(OFF_KEY_STUD, st);
+      return { ok: true };
+    }
+    case "modifica_studente": return apiOffline("aggiorna_studente", p);
+    case "elimina_studente": {
+      offWrite(OFF_KEY_STUD, st.filter(function(x) { return x.id !== p.id; }));
+      return { ok: true };
+    }
+    case "lista_delegazione": {
+      return { ok: true, delegazione: st.filter(function(x) { return x.paese === p.paese; }) };
+    }
+    case "cerca_studente": {
+      const qn = (p.nome    || "").trim().toLowerCase();
+      const qc = (p.cognome || "").trim().toLowerCase();
+      if (!qn && !qc) return { ok: false, errore: "Inserisci almeno nome o cognome." };
+      const ris = st.filter(function(s) {
+        const sn = (s.nome    || "").toLowerCase();
+        const sc = (s.cognome || "").toLowerCase();
+        const mN = qn ? sn.indexOf(qn) >= 0 : true;
+        const mC = qc ? sc.indexOf(qc) >= 0 : true;
+        return mN && mC;
+      }).map(function(s) {
+        return { id: s.id, nome: s.nome, cognome: s.cognome, paese: s.paese,
+                 paeseName: s.paeseName, ente: s.ente, emoji: s.emoji,
+                 wg: parseInt(s.wg), isDelegatoCapo: parseInt(s.wg) === 4 };
+      });
+      return { ok: true, risultati: ris };
+    }
+    case "tutti_studenti": return { ok: true, studenti: st };
+    case "sintesi_complete": {
+      const perPaese = {};
+      PAESI.forEach(function(x) { perPaese[x.id] = []; });
+      st.forEach(function(s) {
+        if (!s.paese || !perPaese[s.paese]) return;
+        perPaese[s.paese].push({
+          id: s.id, nome: s.nome, cognome: s.cognome, wg: parseInt(s.wg),
+          isDelegatoCapo: parseInt(s.wg) === 4,
+          sintesiPosizione: s.sintesiPosizione || "",
+          ballotVoto: s.ballotVoto || "",
+          completato: !!s.completato,
+        });
+      });
+      Object.keys(perPaese).forEach(function(k) { perPaese[k].sort(function(a,b) { return a.wg - b.wg; }); });
+      return { ok: true, perPaese: perPaese };
+    }
+    case "set_voto_prelim":
+    case "set_voto_finale": {
+      const campo = action === "set_voto_prelim" ? "votoPreliminare" : "votoFinale";
+      const idx = voti.findIndex(function(v) { return v.paese === p.paese; });
+      if (idx < 0) {
+        const nuovo = { paese: p.paese }; nuovo[campo] = p.voto;
+        voti.push(nuovo);
+      } else {
+        voti[idx][campo] = p.voto;
+      }
+      offWrite(OFF_KEY_VOTI, voti);
+      return { ok: true };
+    }
+    case "get_voti": return { ok: true, voti: voti };
+    case "reset_plenaria": { offWrite(OFF_KEY_VOTI, []); offWrite(OFF_KEY_INTR, []); offWrite(OFF_KEY_DBRF, []); return { ok: true }; }
+    case "registra_intervento": {
+      const intr = offRead(OFF_KEY_INTR); intr.push({ ...p, timestamp: new Date().toISOString() }); offWrite(OFF_KEY_INTR, intr);
+      return { ok: true };
+    }
+    case "get_interventi": return { ok: true, interventi: offRead(OFF_KEY_INTR) };
+    case "salva_debriefing": {
+      const dbrf = offRead(OFF_KEY_DBRF); dbrf.push({ ...p, timestamp: new Date().toISOString() }); offWrite(OFF_KEY_DBRF, dbrf);
+      return { ok: true };
+    }
+    case "get_debriefing": return { ok: true, debriefing: offRead(OFF_KEY_DBRF) };
+    case "diagnostica_coerenza": {
+      const diag = PAESI.map(function(p) {
+        const dele = st.filter(function(s) { return s.paese === p.id; });
+        const capo = dele.filter(function(s) { return parseInt(s.wg) === 4; })[0];
+        const esp = dele.filter(function(s) { return parseInt(s.wg) !== 4; });
+        const votoCapo = capo ? (capo.ballotVoto || "") : "";
+        const votiEsp = esp.map(function(e) { return { wg: parseInt(e.wg), voto: e.ballotVoto || "", nome: e.nome + " " + e.cognome }; });
+        const divg = votoCapo ? votiEsp.filter(function(v) { return v.voto && v.voto !== votoCapo; }) : [];
+        const tutti = [votoCapo].concat(votiEsp.map(function(v) { return v.voto; })).filter(function(v) { return !!v; });
+        const unici = [...new Set(tutti)];
+        return { paese: p.id, votoDelegatoCapo: votoCapo, votiEsperti: votiEsp, votiDivergenti: divg, numeroVotiUnici: unici.length, tensione: unici.length > 1 };
+      });
+      return { ok: true, diagnostica: diag };
+    }
+    case "archivia_plenaria": {
+      const arc = offRead(OFF_KEY_ARCH);
+      arc.push({ ...p, id: "plen_" + Date.now(), dataPlenaria: new Date().toISOString() });
+      offWrite(OFF_KEY_ARCH, arc);
+      return { ok: true, id: arc[arc.length-1].id };
+    }
+    case "lista_archivio": return { ok: true, archivio: offRead(OFF_KEY_ARCH) };
+    case "reset_totale": { offWrite(OFF_KEY_STUD, []); offWrite(OFF_KEY_VOTI, []); offWrite(OFF_KEY_INTR, []); offWrite(OFF_KEY_DBRF, []); return { ok: true }; }
+    default: return { ok: false, errore: "Azione offline non implementata: " + action };
+  }
+}
+
+// Sessione studente: quale studente è loggato su questo dispositivo
+const STORAGE_SESSIONE = "iso_studente_sessione";
+// Autenticazione docente: ricordata tra refresh
+const STORAGE_DOCENTE = "iso_docente_auth";
+// Codice docente: salvato in sessionStorage e iniettato in ogni apiCall come
+// prova di autenticazione (vedi apiCall). Rimosso dal logout.
+const STORAGE_DOCENTE_PWD = "iso_docente_pwd";
+// ═══════════════════════════════════════════════════════════════════════════
+// STILI CSS
+// ═══════════════════════════════════════════════════════════════════════════
+const css = `
+  @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=Source+Serif+4:ital,wght@0,300;0,400;0,600;1,300;1,400&display=swap');
+
+  :root {
+    --blu: #0d2240;
+    --blu-mid: #1a3a6b;
+    --blu-light: #2a5298;
+    --oro: #c9a84c;
+    --oro-light: #e8c97a;
+    --bg: #f5f2eb;
+    --bg-card: #ffffff;
+    --testo: #1a1a1a;
+    --testo-light: #5a5a5a;
+    --bordo: #d8d0be;
+    --verde: #1a6b3a;
+    --rosso: #8a1a1a;
+    --viola: #5a1a8a;
+    --arancio: #8a3a1a;
+    --ambra: #b8860b;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body { font-family: 'Source Serif 4', serif; background: var(--bg); color: var(--testo); min-height: 100vh; }
+  .app { min-height: 100vh; display: flex; flex-direction: column; }
+
+  /* HEADER */
+  .header { background: var(--blu); color: white; padding: 16px 24px; display: flex; align-items: center; justify-content: space-between; gap: 12px; border-bottom: 3px solid var(--oro); }
+  .header-logo { display: flex; align-items: center; gap: 12px; }
+  .header-logo-badge { background: var(--oro); color: var(--blu); font-family: 'Syne', sans-serif; font-weight: 800; font-size: 11px; letter-spacing: 0.08em; padding: 4px 8px; border-radius: 2px; }
+  .header-title { font-family: 'Syne', sans-serif; font-weight: 700; font-size: 15px; letter-spacing: 0.02em; }
+  .header-sub { font-size: 11px; color: rgba(255,255,255,0.6); margin-top: 1px; }
+  .header-right { display: flex; gap: 8px; align-items: center; }
+
+  /* BOTTONI */
+  .btn { font-family: 'Syne', sans-serif; font-weight: 600; font-size: 13px; letter-spacing: 0.04em; padding: 8px 16px; border: none; cursor: pointer; border-radius: 3px; transition: all 0.15s; }
+  .btn-primary { background: var(--oro); color: var(--blu); }
+  .btn-primary:hover { background: var(--oro-light); }
+  .btn-secondary { background: transparent; color: white; border: 1px solid rgba(255,255,255,0.3); }
+  .btn-secondary:hover { background: rgba(255,255,255,0.1); }
+  .btn-danger { background: var(--rosso); color: white; }
+  .btn-danger:hover { background: #a02222; }
+  .btn-ghost { background: transparent; color: var(--blu-mid); border: 1px solid var(--bordo); }
+  .btn-ghost:hover { background: var(--bg); }
+  .btn-verde { background: var(--verde); color: white; }
+  .btn-verde:hover { background: #0f5530; }
+  .btn-sm { padding: 5px 10px; font-size: 11px; }
+  .btn-lg { padding: 12px 28px; font-size: 15px; }
+  .btn-full { width: 100%; }
+  .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  /* MAIN CONTENT */
+  .main { flex: 1; padding: 24px; max-width: 680px; margin: 0 auto; width: 100%; }
+  .main-wide { max-width: 1100px; }
+  .main-xwide { max-width: 1280px; }
+
+  /* CARD */
+  .card { background: var(--bg-card); border: 1px solid var(--bordo); border-radius: 6px; padding: 24px; margin-bottom: 16px; box-shadow: 0 1px 4px rgba(0,0,0,0.06); }
+  .card-title { font-family: 'Syne', sans-serif; font-weight: 700; font-size: 16px; color: var(--blu); margin-bottom: 12px; letter-spacing: 0.01em; }
+  .card-sub { font-size: 13px; color: var(--testo-light); margin-bottom: 16px; line-height: 1.5; }
+
+  /* LANDING */
+  .landing-hero { background: var(--blu); color: white; padding: 48px 24px; text-align: center; }
+  .landing-hero h1 { font-family: 'Syne', sans-serif; font-weight: 800; font-size: 28px; letter-spacing: -0.01em; margin-bottom: 8px; }
+  .landing-hero p { color: rgba(255,255,255,0.7); font-size: 15px; }
+  .landing-hero .nwip-badge { display: inline-block; background: rgba(201,168,76,0.2); border: 1px solid var(--oro); color: var(--oro-light); font-family: 'Syne', sans-serif; font-size: 11px; font-weight: 600; letter-spacing: 0.1em; padding: 4px 12px; border-radius: 20px; margin-bottom: 20px; }
+  .landing-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; padding: 24px; max-width: 680px; margin: 0 auto; }
+  .landing-card { background: var(--bg-card); border: 1px solid var(--bordo); border-radius: 6px; padding: 28px 24px; cursor: pointer; transition: all 0.2s; text-align: center; }
+  .landing-card:hover { border-color: var(--blu-light); box-shadow: 0 4px 16px rgba(0,0,0,0.1); transform: translateY(-2px); }
+  .landing-card-icon { font-size: 36px; margin-bottom: 12px; }
+  .landing-card-title { font-family: 'Syne', sans-serif; font-weight: 700; font-size: 16px; color: var(--blu); margin-bottom: 6px; }
+  .landing-card-desc { font-size: 13px; color: var(--testo-light); line-height: 1.5; }
+
+  /* FORM */
+  .form-group { margin-bottom: 16px; }
+  .form-label { display: block; font-family: 'Syne', sans-serif; font-weight: 600; font-size: 12px; letter-spacing: 0.06em; color: var(--testo-light); margin-bottom: 6px; text-transform: uppercase; }
+  .form-input { width: 100%; padding: 10px 14px; border: 1px solid var(--bordo); border-radius: 4px; font-family: 'Source Serif 4', serif; font-size: 15px; color: var(--testo); background: white; transition: border-color 0.15s; }
+  .form-input:focus { outline: none; border-color: var(--blu-light); }
+  .form-input:disabled { background: #f0ede5; cursor: not-allowed; color: #999; }
+  .form-select { appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%235a5a5a' stroke-width='1.5' fill='none'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 12px center; padding-right: 36px; }
+  .form-textarea { min-height: 100px; resize: vertical; font-family: 'Source Serif 4', serif; line-height: 1.5; }
+  .form-error { color: var(--rosso); font-size: 12px; margin-top: 4px; }
+  .form-help { color: var(--testo-light); font-size: 12px; margin-top: 4px; line-height: 1.4; }
+
+  /* BADGE WG */
+  .wg-badge { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 20px; font-family: 'Syne', sans-serif; font-weight: 700; font-size: 11px; letter-spacing: 0.05em; color: white; }
+
+  /* SEZIONI SCHEDA STUDENTE */
+  .sezione-nav { display: flex; gap: 4px; margin-bottom: 20px; flex-wrap: wrap; }
+  .sezione-tab { padding: 6px 12px; border-radius: 20px; font-family: 'Syne', sans-serif; font-weight: 600; font-size: 11px; cursor: pointer; border: 1px solid var(--bordo); background: white; color: var(--testo-light); transition: all 0.15s; }
+  .sezione-tab.attiva { color: white; border-color: transparent; }
+  .sezione-tab.visitata { opacity: 0.8; }
+
+  .info-box { background: #f0f4fa; border-left: 3px solid var(--blu-light); padding: 16px; border-radius: 0 4px 4px 0; font-size: 14px; line-height: 1.7; white-space: pre-line; margin-bottom: 12px; }
+
+  .fonte-link { display: flex; align-items: flex-start; gap: 10px; padding: 12px 14px; background: white; border: 1px solid var(--bordo); border-radius: 4px; margin-bottom: 8px; text-decoration: none; color: var(--testo); transition: all 0.15s; }
+  .fonte-link:hover { border-color: var(--blu-light); background: #f0f4fa; }
+  .fonte-link-icon { font-size: 18px; flex-shrink: 0; }
+  .fonte-link-testo { font-size: 13px; line-height: 1.4; }
+  .fonte-link-url { font-size: 11px; color: var(--blu-light); margin-top: 2px; }
+
+  .domanda-item { padding: 12px 14px; background: white; border: 1px solid var(--bordo); border-left: 3px solid var(--oro); border-radius: 0 4px 4px 0; margin-bottom: 8px; font-size: 14px; line-height: 1.5; color: var(--testo); }
+
+  .conflitto-box { background: #fff8f0; border: 1px solid #e8c97a; border-radius: 4px; padding: 16px; margin-bottom: 12px; }
+  .conflitto-titolo { font-family: 'Syne', sans-serif; font-weight: 700; font-size: 13px; color: var(--arancio); margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.06em; }
+  .conflitto-testo { font-size: 14px; line-height: 1.7; white-space: pre-line; }
+  .iniezione-box { background: var(--blu); color: white; padding: 12px 14px; border-radius: 4px; margin-top: 12px; font-size: 13px; line-height: 1.5; font-style: italic; }
+  .iniezione-label { font-style: normal; font-family: 'Syne', sans-serif; font-weight: 700; font-size: 10px; letter-spacing: 0.1em; opacity: 0.6; margin-bottom: 4px; }
+
+  /* BALLOT */
+  .ballot-opzioni { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 16px 0; }
+  .ballot-opzione { padding: 14px 12px; border: 2px solid var(--bordo); border-radius: 4px; cursor: pointer; transition: all 0.15s; text-align: center; }
+  .ballot-opzione:hover { border-color: var(--blu-light); }
+  .ballot-opzione.selezionata.A { border-color: var(--verde); background: #f0faf4; }
+  .ballot-opzione.selezionata.AC { border-color: #2a7a5a; background: #f0faf6; }
+  .ballot-opzione.selezionata.D { border-color: var(--rosso); background: #faf0f0; }
+  .ballot-opzione.selezionata.AB { border-color: #777; background: #f5f5f5; }
+  .ballot-sigla { font-family: 'Syne', sans-serif; font-weight: 800; font-size: 20px; margin-bottom: 4px; }
+  .ballot-sigla.A { color: var(--verde); }
+  .ballot-sigla.AC { color: #2a7a5a; }
+  .ballot-sigla.D { color: var(--rosso); }
+  .ballot-sigla.AB { color: #777; }
+  .ballot-nome { font-family: 'Syne', sans-serif; font-weight: 600; font-size: 11px; letter-spacing: 0.04em; color: var(--testo-light); margin-bottom: 4px; }
+  .ballot-desc { font-size: 11px; color: var(--testo-light); line-height: 1.4; }
+
+  /* PROGRESS */
+  .progress-bar { height: 4px; background: var(--bordo); border-radius: 2px; overflow: hidden; margin: 8px 0; }
+  .progress-fill { height: 100%; background: var(--oro); border-radius: 2px; transition: width 0.3s; }
+
+  /* DASHBOARD DOCENTE */
+  .dashboard-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
+  .studente-card { background: var(--bg-card); border: 1px solid var(--bordo); border-radius: 6px; padding: 16px; display: flex; flex-direction: column; gap: 8px; }
+  .studente-card-header { display: flex; align-items: center; gap: 10px; }
+  .studente-nome { font-family: 'Syne', sans-serif; font-weight: 700; font-size: 14px; color: var(--blu); }
+  .studente-paese { font-size: 12px; color: var(--testo-light); }
+  .studente-stato { font-size: 11px; padding: 2px 8px; border-radius: 10px; font-family: 'Syne', sans-serif; font-weight: 600; }
+  .stato-pronto { background: #e8f5ee; color: var(--verde); }
+  .stato-in-corso { background: #fff8e8; color: #8a6a1a; }
+  .stato-non-iniziato { background: #f5f5f5; color: #888; }
+
+  /* PLENARIA HEADER */
+  .plenaria-header { background: var(--blu); color: white; padding: 24px; text-align: center; border-radius: 6px; margin-bottom: 20px; }
+  .plenaria-title { font-family: 'Syne', sans-serif; font-weight: 800; font-size: 22px; letter-spacing: -0.01em; margin-bottom: 4px; }
+  .plenaria-sub { color: rgba(255,255,255,0.6); font-size: 13px; }
+
+  .voto-row { display: flex; align-items: center; gap: 12px; padding: 12px 16px; background: var(--bg-card); border: 1px solid var(--bordo); border-radius: 4px; margin-bottom: 8px; }
+  .voto-paese { font-family: 'Syne', sans-serif; font-weight: 700; font-size: 14px; flex: 1; }
+  .voto-ente { font-size: 11px; color: var(--testo-light); }
+  .voto-btn-group { display: flex; gap: 4px; }
+  .voto-btn { padding: 6px 10px; border: 2px solid var(--bordo); border-radius: 3px; cursor: pointer; font-family: 'Syne', sans-serif; font-weight: 700; font-size: 12px; background: white; transition: all 0.12s; }
+  .voto-btn.selezionato.A { border-color: var(--verde); background: var(--verde); color: white; }
+  .voto-btn.selezionato.AC { border-color: #2a7a5a; background: #2a7a5a; color: white; }
+  .voto-btn.selezionato.D { border-color: var(--rosso); background: var(--rosso); color: white; }
+  .voto-btn.selezionato.AB { border-color: #777; background: #777; color: white; }
+
+  /* RISULTATO */
+  .risultato-box { border-radius: 6px; padding: 24px; text-align: center; margin-bottom: 16px; }
+  .risultato-approvata { background: var(--verde); color: white; }
+  .risultato-respinta { background: var(--rosso); color: white; }
+  .risultato-titolo { font-family: 'Syne', sans-serif; font-weight: 800; font-size: 28px; letter-spacing: -0.01em; margin-bottom: 8px; }
+  .risultato-sub { font-size: 14px; opacity: 0.85; }
+  .soglia-row { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--bordo); font-size: 13px; }
+  .soglia-ok { color: var(--verde); font-weight: 600; }
+  .soglia-no { color: var(--rosso); font-weight: 600; }
+
+  /* GLOSSARIO */
+  .glossario-item { padding: 12px 0; border-bottom: 1px solid var(--bordo); }
+  .glossario-termine { font-family: 'Syne', sans-serif; font-weight: 700; font-size: 13px; color: var(--blu); margin-bottom: 3px; }
+  .glossario-def { font-size: 13px; color: var(--testo-light); line-height: 1.5; }
+
+  /* NWIP */
+  .nwip-box { background: var(--blu); color: white; padding: 20px; border-radius: 6px; margin-bottom: 16px; }
+  .nwip-label { font-family: 'Syne', sans-serif; font-weight: 700; font-size: 10px; letter-spacing: 0.12em; color: var(--oro); margin-bottom: 6px; }
+  .nwip-titolo { font-family: 'Source Serif 4', serif; font-style: italic; font-size: 14px; line-height: 1.5; margin-bottom: 12px; }
+  .nwip-row { display: flex; gap: 8px; margin-bottom: 4px; font-size: 12px; }
+  .nwip-key { color: var(--oro); font-family: 'Syne', sans-serif; font-weight: 600; flex-shrink: 0; }
+
+  /* TABS DOCENTE */
+  .doc-tabs { display: flex; border-bottom: 2px solid var(--bordo); margin-bottom: 20px; flex-wrap: wrap; }
+  .doc-tab { padding: 10px 20px; font-family: 'Syne', sans-serif; font-weight: 600; font-size: 13px; cursor: pointer; color: var(--testo-light); border-bottom: 2px solid transparent; margin-bottom: -2px; transition: all 0.15s; }
+  .doc-tab.attiva { color: var(--blu); border-bottom-color: var(--blu); }
+
+  /* LOADING */
+  .loading { text-align: center; padding: 48px; color: var(--testo-light); font-size: 14px; }
+
+  /* COMPLETAMENTO */
+  .completamento-box { background: linear-gradient(135deg, var(--blu) 0%, var(--blu-mid) 100%); color: white; padding: 24px; border-radius: 6px; text-align: center; }
+  .completamento-icon { font-size: 48px; margin-bottom: 12px; }
+  .completamento-title { font-family: 'Syne', sans-serif; font-weight: 800; font-size: 20px; margin-bottom: 8px; }
+  .completamento-sub { font-size: 13px; opacity: 0.8; line-height: 1.6; }
+
+  .divider { border: none; border-top: 1px solid var(--bordo); margin: 16px 0; }
+  .tag { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-family: 'Syne', sans-serif; font-weight: 600; background: var(--bg); border: 1px solid var(--bordo); color: var(--testo-light); }
+  .tag-oro { background: rgba(201,168,76,0.15); border-color: var(--oro); color: #8a6a00; }
+  .tag-verde { background: #e8f5ee; border-color: var(--verde); color: var(--verde); }
+  .tag-rosso { background: #f9e4e4; border-color: var(--rosso); color: var(--rosso); }
+  .tag-ambra { background: #fff4d4; border-color: var(--ambra); color: var(--ambra); }
+
+  /* ── VISTA DI DELEGAZIONE ────────────────────────────────────────── */
+  .delegazione-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-top: 12px; }
+  .delegazione-slot { background: white; border: 1px solid var(--bordo); border-radius: 4px; padding: 12px; min-height: 120px; display: flex; flex-direction: column; }
+  .delegazione-slot.vuoto { background: #faf8f3; border-style: dashed; color: var(--testo-light); }
+  .delegazione-slot.self { border-color: var(--oro); border-width: 2px; background: #fffbef; }
+  .delegazione-slot.capo { border-top: 3px solid var(--viola); }
+  .delegazione-wg { font-family: 'Syne', sans-serif; font-weight: 700; font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 4px; color: var(--testo-light); }
+  .delegazione-nome { font-family: 'Syne', sans-serif; font-weight: 700; font-size: 13px; color: var(--blu); margin-bottom: 4px; }
+  .delegazione-sintesi { font-size: 12px; line-height: 1.45; color: var(--testo); flex: 1; white-space: pre-wrap; }
+  .delegazione-voto { margin-top: 6px; font-size: 11px; }
+
+  /* ── PANNELLO CHAIR ─────────────────────────────────────────────── */
+  .chair-layout { display: grid; grid-template-columns: 280px 1fr; gap: 16px; }
+  @media (max-width: 900px) { .chair-layout { grid-template-columns: 1fr; } }
+
+  .chair-timer { background: var(--blu); color: white; border-radius: 6px; padding: 18px; display: flex; flex-direction: column; gap: 12px; position: sticky; top: 16px; }
+  .chair-timer-label { font-family: 'Syne', sans-serif; font-weight: 700; font-size: 10px; letter-spacing: 0.12em; color: var(--oro); text-transform: uppercase; }
+  .chair-timer-fase { font-family: 'Syne', sans-serif; font-weight: 800; font-size: 18px; }
+  .chair-timer-desc { font-size: 12px; color: rgba(255,255,255,0.75); line-height: 1.5; }
+  .chair-timer-display { font-family: 'Syne', sans-serif; font-weight: 800; font-size: 48px; text-align: center; letter-spacing: -0.02em; margin: 10px 0; }
+  .chair-timer-display.warning { color: #ffb347; }
+  .chair-timer-display.danger  { color: #ff6b6b; animation: pulse 1s ease-in-out infinite; }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.55; } }
+  .chair-timer-btns { display: flex; gap: 6px; }
+  .chair-timer-btns button { flex: 1; padding: 6px 8px; font-size: 11px; }
+
+  .chair-fase-picker { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; }
+  .chair-fase-btn { padding: 5px 4px; border: 1px solid rgba(255,255,255,0.25); background: transparent; color: rgba(255,255,255,0.85); border-radius: 3px; font-family: 'Syne', sans-serif; font-weight: 600; font-size: 10px; cursor: pointer; transition: all 0.15s; }
+  .chair-fase-btn.active { background: var(--oro); color: var(--blu); border-color: var(--oro); }
+  .chair-fase-btn:hover:not(.active) { background: rgba(255,255,255,0.1); }
+
+  .chair-iniezione { background: rgba(255,255,255,0.08); border-left: 2px solid var(--oro); padding: 10px 12px; border-radius: 0 3px 3px 0; font-size: 12px; font-style: italic; line-height: 1.55; }
+  .chair-iniezione-wg { font-style: normal; font-family: 'Syne', sans-serif; font-weight: 700; font-size: 10px; color: var(--oro); letter-spacing: 0.08em; margin-bottom: 4px; }
+
+  .interventi-table { width: 100%; font-size: 12px; }
+  .interventi-table td { padding: 6px 8px; border-bottom: 1px solid var(--bordo); }
+  .interv-btn { padding: 4px 8px; border: 1px solid var(--bordo); background: white; border-radius: 3px; font-family: 'Syne', sans-serif; font-weight: 600; font-size: 11px; cursor: pointer; transition: all 0.12s; }
+  .interv-btn:hover { background: var(--bg); border-color: var(--blu-light); }
+  .interv-count { display: inline-block; min-width: 22px; padding: 2px 6px; background: var(--blu); color: white; border-radius: 10px; font-family: 'Syne', sans-serif; font-weight: 700; font-size: 11px; text-align: center; }
+
+  /* VOTI PRELIMINARI/FINALI — differenziazione visiva */
+  .voto-prelim-label { display: inline-block; padding: 1px 6px; border-radius: 8px; background: #fff4d4; color: #7a5a0a; font-family: 'Syne', sans-serif; font-weight: 700; font-size: 9px; letter-spacing: 0.08em; text-transform: uppercase; }
+  .voto-finale-label { display: inline-block; padding: 1px 6px; border-radius: 8px; background: var(--blu); color: white; font-family: 'Syne', sans-serif; font-weight: 700; font-size: 9px; letter-spacing: 0.08em; text-transform: uppercase; }
+  .voto-cambiato { color: var(--arancio); font-family: 'Syne', sans-serif; font-weight: 700; font-size: 11px; }
+
+  /* ── DIAGNOSTICA COERENZA ───────────────────────────────────────── */
+  .diag-card { background: white; border: 1px solid var(--bordo); border-radius: 6px; padding: 12px; margin-bottom: 8px; }
+  .diag-card.tensione { border-left: 3px solid var(--arancio); background: #fff8f0; }
+  .diag-card.coerente { border-left: 3px solid var(--verde); }
+  .diag-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+  .diag-paese { font-family: 'Syne', sans-serif; font-weight: 700; font-size: 13px; color: var(--blu); }
+  .diag-voti { display: flex; gap: 4px; margin-top: 6px; flex-wrap: wrap; }
+  .diag-voto-pill { padding: 2px 8px; border-radius: 10px; font-family: 'Syne', sans-serif; font-weight: 700; font-size: 11px; border: 1px solid var(--bordo); background: white; }
+  .diag-voto-pill.div { background: #fff4e0; border-color: var(--arancio); color: var(--arancio); }
+  .diag-voto-pill.capo { background: var(--viola); color: white; border-color: var(--viola); }
+
+  /* ── ARCHIVIO PLENARIE ──────────────────────────────────────────── */
+  .archivio-item { background: white; border: 1px solid var(--bordo); border-radius: 6px; padding: 16px; margin-bottom: 10px; }
+  .archivio-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 10px; }
+  .archivio-titolo { font-family: 'Syne', sans-serif; font-weight: 700; font-size: 14px; color: var(--blu); }
+  .archivio-meta { font-size: 11px; color: var(--testo-light); margin-top: 2px; }
+  .archivio-stats { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; margin-top: 8px; }
+  .archivio-voto-cella { text-align: center; padding: 6px 2px; border-radius: 3px; font-family: 'Syne', sans-serif; font-weight: 700; font-size: 11px; }
+  .archivio-voto-cella.A { background: #e8f5ee; color: var(--verde); }
+  .archivio-voto-cella.AC { background: #e0f0e8; color: #1a5a2a; }
+  .archivio-voto-cella.D { background: #f9e4e4; color: var(--rosso); }
+  .archivio-voto-cella.AB { background: #f0f0f0; color: #666; }
+  .archivio-voto-cella.vuoto { background: #fafafa; color: #ccc; }
+
+  /* ── DEBRIEFING ─────────────────────────────────────────────────── */
+  .debrief-domanda { background: white; border: 1px solid var(--bordo); border-radius: 6px; padding: 16px; margin-bottom: 12px; }
+  .debrief-domanda-testo { font-family: 'Syne', sans-serif; font-weight: 600; font-size: 14px; color: var(--blu); margin-bottom: 10px; line-height: 1.4; }
+  .debrief-opzione { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border: 1px solid var(--bordo); border-radius: 4px; margin-bottom: 6px; cursor: pointer; transition: all 0.15s; font-size: 13px; }
+  .debrief-opzione:hover { border-color: var(--blu-light); background: var(--bg); }
+  .debrief-opzione.scelta { border-color: var(--verde); background: #f0faf4; }
+
+  /* SLOT SELECTION UI */
+  .slot-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px; margin-top: 8px; }
+  .slot-tile { border: 2px solid var(--bordo); border-radius: 4px; padding: 12px 10px; cursor: pointer; background: white; text-align: center; transition: all 0.15s; }
+  .slot-tile:hover:not(.disabled) { border-color: var(--blu-light); background: var(--bg); }
+  .slot-tile.selected { border-color: var(--oro); background: #fffbef; box-shadow: 0 0 0 2px rgba(201,168,76,0.2); }
+  .slot-tile.disabled { opacity: 0.4; cursor: not-allowed; background: #f5f2eb; }
+  .slot-paese-label { font-family: 'Syne', sans-serif; font-weight: 700; font-size: 13px; }
+  .slot-wg-list { display: flex; gap: 4px; margin-top: 6px; justify-content: center; flex-wrap: wrap; }
+  .slot-wg-pill { padding: 2px 6px; border-radius: 8px; font-size: 10px; font-family: 'Syne', sans-serif; font-weight: 700; }
+  .slot-wg-pill.libero { background: #e8f5ee; color: var(--verde); cursor: pointer; }
+  .slot-wg-pill.occupato { background: #f0f0f0; color: #aaa; text-decoration: line-through; }
+  .slot-wg-pill.selected-wg { background: var(--oro); color: var(--blu); }
+
+  @media (max-width: 700px) {
+    .landing-cards { grid-template-columns: 1fr; }
+    .ballot-opzioni { grid-template-columns: 1fr 1fr; }
+    .header-title { font-size: 13px; }
+    .voto-btn-group { gap: 2px; }
+    .voto-btn { padding: 5px 8px; font-size: 11px; }
+    .delegazione-grid { grid-template-columns: 1fr 1fr; }
+    .archivio-stats { grid-template-columns: repeat(4, 1fr); }
+  }
+`;
+// ═══════════════════════════════════════════════════════════════════════════
+// COMPONENTE ROOT
+// ═══════════════════════════════════════════════════════════════════════════
+function App() {
+  const [modalita, setModalita] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [studenteCorrente, setStudenteCorrente] = useState(null);
+  const [docenteAuth, setDocenteAuth] = useState(false);
+  const [emailDocente, setEmailDocente] = useState("");
+
+  useEffect(function() {
+    // Prova a recuperare la sessione studente e verifica che lo studente
+    // esista ancora sul backend (il docente potrebbe averlo modificato).
+    async function init() {
+      const saved = sessionStorage.getItem(STORAGE_SESSIONE);
+      if (saved) {
+        try {
+          const parsed = JSON.parse(saved);
+          const fresh = await apiCall("get_studente", { id: parsed.id });
+          if (fresh.ok) {
+            setStudenteCorrente(fresh.studente);
+            setModalita("studente");
+            setLoading(false);
+            return;
+          }
+        } catch (e) {}
+        sessionStorage.removeItem(STORAGE_SESSIONE);
+      }
+      // Controlla se il docente era già autenticato in questa sessione.
+      // Richiediamo sia il flag sia la password: senza password la verifica
+      // fallirebbe (il backend autorizza solo se riceve il DOCENTE_CODE corretto).
+      const docSaved = sessionStorage.getItem(STORAGE_DOCENTE);
+      const pwdSaved = sessionStorage.getItem(STORAGE_DOCENTE_PWD);
+      if (docSaved && pwdSaved) {
+        const verifica = await apiCall("verifica_docente", {});
+        if (verifica.ok && verifica.autorizzato) {
+          setDocenteAuth(true);
+          setEmailDocente(verifica.email);
+          setModalita("docente");
+          setLoading(false);
+          return;
+        } else {
+          // Password non più valida: ripulisci lo stato
+          sessionStorage.removeItem(STORAGE_DOCENTE);
+          sessionStorage.removeItem(STORAGE_DOCENTE_PWD);
+        }
+      }
+      setModalita("landing");
+      setLoading(false);
+    }
+    init();
+  }, []);
+
+  const handleLogout = function() {
+    sessionStorage.removeItem(STORAGE_SESSIONE);
+    sessionStorage.removeItem(STORAGE_DOCENTE);
+    sessionStorage.removeItem(STORAGE_DOCENTE_PWD);
+    setStudenteCorrente(null);
+    setDocenteAuth(false);
+    setEmailDocente("");
+    setModalita("landing");
+  };
+
+  if (loading) return (
+    <>
+      <style>{css}</style>
+      <div className="app"><div className="loading">Caricamento...</div></div>
+    </>
+  );
+
+  return (
+    <>
+      <style>{css}</style>
+      <div className="app">
+        <Header
+          modalita={modalita}
+          studente={studenteCorrente}
+          docenteAuth={docenteAuth}
+          emailDocente={emailDocente}
+          onLogout={handleLogout}
+          onHome={function() { setModalita("landing"); }}
+        />
+        {modalita === "landing" && (
+          <Landing
+            onStudente={function() { setModalita("studente-login"); }}
+            onDocente={function() { setModalita("docente-login"); }}
+          />
+        )}
+        {modalita === "studente-login" && (
+          <StudenteLogin
+            onLogin={function(s) {
+              setStudenteCorrente(s);
+              sessionStorage.setItem(STORAGE_SESSIONE, JSON.stringify(s));
+              setModalita("studente");
+            }}
+            onBack={function() { setModalita("landing"); }}
+          />
+        )}
+        {modalita === "studente" && studenteCorrente && (
+          <StudenteApp studente={studenteCorrente} onUpdate={setStudenteCorrente} />
+        )}
+        {modalita === "docente-login" && (
+          <DocenteLogin
+            onLogin={function(email) {
+              setDocenteAuth(true);
+              setEmailDocente(email);
+              sessionStorage.setItem(STORAGE_DOCENTE, "1");
+              setModalita("docente");
+            }}
+            onBack={function() { setModalita("landing"); }}
+          />
+        )}
+        {modalita === "docente" && docenteAuth && (
+          <DocenteApp email={emailDocente} />
+        )}
+      </div>
+    </>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// HEADER
+// ═══════════════════════════════════════════════════════════════════════════
+function Header({ modalita, studente, docenteAuth, emailDocente, onLogout, onHome }) {
+  const mostraLogout = studente || docenteAuth;
+  return (
+    <div className="header">
+      <div className="header-logo" onClick={onHome} style={{ cursor: "pointer" }}>
+        <div className="header-logo-badge">ISO/TC 20</div>
+        <div>
+          <div className="header-title">Simulazione SC 16 — UAS</div>
+          <div className="header-sub">ITTL · Navigazione Aerea e Logistica · Classe 3ª</div>
+        </div>
+      </div>
+      <div className="header-right">
+        {MODALITA_OFFLINE_TEST && (
+          <span style={{ fontSize: 11, background: "#fff4d4", color: "#7a5a0a", padding: "3px 8px", borderRadius: 10, fontFamily: "Syne, sans-serif", fontWeight: 700, letterSpacing: "0.06em" }}>
+            MODO OFFLINE TEST
+          </span>
+        )}
+        {studente && (
+          <span style={{ fontSize: 13, color: "rgba(255,255,255,0.7)" }}>
+            {studente.emoji} {studente.nome}
+          </span>
+        )}
+        {docenteAuth && !studente && (
+          <span style={{ fontSize: 13, color: "rgba(255,255,255,0.7)" }}>👨‍🏫 {emailDocente || "Docente"}</span>
+        )}
+        {mostraLogout && (
+          <button className="btn btn-secondary btn-sm" onClick={onLogout}>Esci</button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// LANDING
+// ═══════════════════════════════════════════════════════════════════════════
+function Landing({ onStudente, onDocente }) {
+  return (
+    <div>
+      <div className="landing-hero">
+        <div className="nwip-badge">NWIP · ISO/TC 20/SC 16 N-XXX</div>
+        <h1>Simulazione Sessione Plenaria ISO</h1>
+        <p>UAS — Remote Identification · Limiti operativi · Certificazione · Campo di applicazione</p>
+      </div>
+      <div className="landing-cards">
+        <div className="landing-card" onClick={onStudente}>
+          <div className="landing-card-icon">🎓</div>
+          <div className="landing-card-title">Sono uno Studente</div>
+          <div className="landing-card-desc">Accedi alla scheda del tuo WG, studia il materiale e prepara la tua posizione per la plenaria.</div>
+        </div>
+        <div className="landing-card" onClick={onDocente}>
+          <div className="landing-card-icon">📋</div>
+          <div className="landing-card-title">Sono il Docente</div>
+          <div className="landing-card-desc">Visualizza la classe, gestisci la sessione plenaria e calcola il risultato del voto ISO.</div>
+        </div>
+      </div>
+      <div style={{ padding: "0 24px 24px", maxWidth: 680, margin: "0 auto" }}>
+        <div className="nwip-box">
+          <div className="nwip-label">NEW WORK ITEM PROPOSAL IN VOTAZIONE</div>
+          <div className="nwip-titolo">Aerospace — Unmanned Aircraft Systems (UAS) — Minimum requirements for remote identification, operational limits, operator certification and scope of application in non-segregated civil airspace</div>
+          <div className="nwip-row"><span className="nwip-key">Proponente:</span><span>AFNOR (Francia) · co-proponenti: DIN (Germania), JSA (Giappone)</span></div>
+          <div className="nwip-row"><span className="nwip-key">Scope:</span><span>UAS con MTOW 250 g–25 kg, spazio aereo civile non segregato. Esclusi: MTOW &lt;250 g, droni militari, spazio aereo segregato.</span></div>
+        </div>
+        <div style={{ marginTop: 16, padding: 16, background: "#fff8e7", border: "1px solid #d9b96a", borderRadius: 6, fontSize: 13, lineHeight: 1.6 }}>
+          <div style={{ fontFamily: "Syne, sans-serif", fontWeight: 700, fontSize: 12, color: "#7a5a1a", marginBottom: 8, textTransform: "uppercase", letterSpacing: "0.06em" }}>📘 Come funziona questa simulazione</div>
+          <div style={{ marginBottom: 6 }}><strong>1. Preparazione individuale.</strong> Ogni studente studia il materiale del proprio WG e registra la propria posizione sull'app.</div>
+          <div style={{ marginBottom: 6 }}><strong>2. Coordinamento di delegazione.</strong> I quattro studenti della stessa delegazione vedono reciprocamente le sintesi e il Delegato Capo stabilisce il voto ufficiale del paese.</div>
+          <div><strong>3. Plenaria in aula.</strong> Il voto finale viene dichiarato oralmente dal Delegato Capo durante l'appello nominale condotto dal Chair. Fa fede solo il voto pronunciato in plenaria.</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// STUDENTE LOGIN — con slot liberi dal backend
+// ═══════════════════════════════════════════════════════════════════════════
+function StudenteLogin({ onLogin, onBack }) {
+  const [mode, setMode] = useState("scelta"); // "scelta" | "esistente" | "nuovo"
+
+  if (mode === "scelta") {
+    return (
+      <div className="main" style={{ paddingTop: 32 }}>
+        <div className="card">
+          <div className="card-title">Registrazione / Accesso</div>
+          <div className="card-sub">Se ti sei già registrato per questa simulazione, cerca il tuo profilo. Altrimenti procedi con una nuova registrazione.</div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button className="btn btn-primary btn-full" onClick={function() { setMode("esistente"); }}>Sono già registrato</button>
+            <button className="btn btn-ghost btn-full" onClick={function() { setMode("nuovo"); }}>Prima volta</button>
+          </div>
+        </div>
+        <button className="btn btn-ghost btn-sm" onClick={onBack}>← Torna indietro</button>
+      </div>
+    );
+  }
+
+  if (mode === "esistente") {
+    return <StudenteRicerca onLogin={onLogin} onBack={function() { setMode("scelta"); }} />;
+  }
+
+  return <StudenteRegistrazione onLogin={onLogin} onBack={function() { setMode("scelta"); }} />;
+}
+
+function StudenteRicerca({ onLogin, onBack }) {
+  const [nome, setNome] = useState("");
+  const [cognome, setCognome] = useState("");
+  const [errore, setErrore] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [trovati, setTrovati] = useState([]);
+
+  const cerca = async function() {
+    if (!nome.trim() && !cognome.trim()) { setErrore("Inserisci almeno nome o cognome."); return; }
+    setLoading(true); setErrore(""); setTrovati([]);
+    // Endpoint pubblico dedicato: ritorna solo i campi identificativi (nome,
+    // cognome, paese, wg), senza dati sensibili. Il profilo completo viene
+    // poi caricato da onLogin tramite get_studente.
+    const res = await apiCall("cerca_studente", { nome: nome.trim(), cognome: cognome.trim() });
+    if (!res.ok) {
+      setErrore(res.errore || "Errore nella ricerca. Riprova tra poco o contatta il docente.");
+      setLoading(false);
+      return;
+    }
+    const lista = res.risultati || [];
+    setTrovati(lista);
+    if (lista.length === 0) setErrore("Nessuno studente trovato con questi dati. Controlla l'ortografia o registrati come nuovo.");
+    setLoading(false);
+  };
+
+  // Quando l'utente clicca "Accedi" su uno dei profili trovati, ricarichiamo
+  // il profilo completo dal backend (con sintesi, voti, sezioni visitate)
+  // prima di avviare la sessione. Così lo studente ritrova intatto il lavoro
+  // svolto da un altro dispositivo.
+  const accedi = async function(profilo) {
+    setLoading(true); setErrore("");
+    const res = await apiCall("get_studente", { id: profilo.id });
+    setLoading(false);
+    if (res.ok && res.studente) {
+      onLogin(res.studente);
+    } else {
+      setErrore(res.errore || "Impossibile caricare il profilo. Riprova.");
+    }
+  };
+
+  return (
+    <div className="main" style={{ paddingTop: 32 }}>
+      <div className="card">
+        <div className="card-title">Cerca il tuo profilo</div>
+        <div className="card-sub">Inserisci nome e/o cognome con cui ti sei registrato. Puoi lasciare un campo vuoto, ma per una ricerca più rapida compila entrambi.</div>
+        <div className="form-group">
+          <label className="form-label">Nome</label>
+          <input className="form-input" value={nome} onChange={function(e) { setNome(e.target.value); }} placeholder="es. Marco" />
+        </div>
+        <div className="form-group">
+          <label className="form-label">Cognome</label>
+          <input className="form-input" value={cognome} onChange={function(e) { setCognome(e.target.value); }} placeholder="es. Rossi" />
+        </div>
+        {errore && <div className="form-error">{errore}</div>}
+        <div style={{ display: "flex", gap: 8 }}>
+          <button className="btn btn-primary" onClick={cerca} disabled={loading}>{loading ? "Cerco..." : "Cerca"}</button>
+          <button className="btn btn-ghost" onClick={onBack}>Indietro</button>
+        </div>
+      </div>
+      {trovati.length > 0 && (
+        <div className="card">
+          <div className="card-title">Profili trovati</div>
+          <div className="card-sub">Seleziona il tuo profilo per accedere.</div>
+          {trovati.map(function(s) {
+            return (
+              <div key={s.id} style={{ padding: "10px 0", borderBottom: "1px solid var(--bordo)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div>
+                  <div style={{ fontFamily: "Syne, sans-serif", fontWeight: 700, fontSize: 14 }}>{s.emoji} {s.nome} {s.cognome}</div>
+                  <div style={{ fontSize: 12, color: "var(--testo-light)" }}>{s.paeseName} / {s.ente} · WG {s.wg}{s.isDelegatoCapo ? " · Delegato Capo" : ""}</div>
+                </div>
+                <button className="btn btn-primary btn-sm" onClick={function() { accedi(s); }} disabled={loading}>Accedi</button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function StudenteRegistrazione({ onLogin, onBack }) {
+  const [nome, setNome] = useState("");
+  const [cognome, setCognome] = useState("");
+  const [paeseId, setPaeseId] = useState("");
+  const [wg, setWg] = useState(null);
+  const [slot, setSlot] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [errore, setErrore] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  useEffect(function() {
+    async function carica() {
+      const res = await apiCall("slot_liberi", {});
+      if (res.ok) setSlot(res.slot);
+      else setErrore(res.errore || "Impossibile caricare gli slot disponibili.");
+      setLoading(false);
+    }
+    carica();
+  }, []);
+
+  const paeseObj = PAESI.filter(function(p) { return p.id === paeseId; })[0];
+
+  const registra = async function() {
+    if (!nome.trim() || !cognome.trim()) { setErrore("Inserisci nome e cognome."); return; }
+    if (!paeseId || !wg) { setErrore("Seleziona paese e WG dallo schema."); return; }
+    setSubmitting(true); setErrore("");
+    const payload = {
+      nome: nome.trim(),
+      cognome: cognome.trim(),
+      paese: paeseId,
+      paeseName: paeseObj.nome,
+      ente: paeseObj.ente,
+      emoji: paeseObj.emoji,
+      wg: wg,
+    };
+    const res = await apiCall("registra_studente", payload);
+    if (res.ok) {
+      onLogin(res.studente);
+    } else {
+      setErrore(res.errore || "Errore in registrazione.");
+      // Ricarica gli slot per aggiornare la UI
+      const ref = await apiCall("slot_liberi", {});
+      if (ref.ok) setSlot(ref.slot);
+    }
+    setSubmitting(false);
+  };
+
+  return (
+    <div className="main" style={{ paddingTop: 32 }}>
+      <div className="card">
+        <div className="card-title">Nuova registrazione</div>
+        <div className="card-sub">Inserisci i tuoi dati e seleziona lo slot che il docente ti ha assegnato nello schema delegazioni × WG.</div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+          <div className="form-group">
+            <label className="form-label">Nome</label>
+            <input className="form-input" value={nome} onChange={function(e) { setNome(e.target.value); }} placeholder="Marco" />
+          </div>
+          <div className="form-group">
+            <label className="form-label">Cognome</label>
+            <input className="form-input" value={cognome} onChange={function(e) { setCognome(e.target.value); }} placeholder="Rossi" />
+          </div>
+        </div>
+
+        <div className="form-group">
+          <label className="form-label">Scegli il tuo slot (paese × WG)</label>
+          {loading ? (
+            <div className="loading" style={{ padding: 20 }}>Carico gli slot disponibili...</div>
+          ) : (
+            <div className="slot-grid">
+              {PAESI.map(function(p) {
+                const wgLiberi = slot ? (slot[p.id] || []) : [];
+                const slotCompleto = wgLiberi.length === 0;
+                const isSelectedPaese = paeseId === p.id;
+                return (
+                  <div key={p.id}
+                    className={"slot-tile " + (slotCompleto ? "disabled" : "") + (isSelectedPaese ? " selected" : "")}
+                    onClick={function() { if (!slotCompleto) { setPaeseId(p.id); if (wgLiberi.indexOf(wg) < 0) setWg(null); } }}>
+                    <div className="slot-paese-label">{p.emoji} {p.nome}</div>
+                    <div style={{ fontSize: 10, color: "var(--testo-light)" }}>{p.ente} · {wgLiberi.length}/4 slot liberi</div>
+                    <div className="slot-wg-list">
+                      {[1,2,3,4].map(function(n) {
+                        const libero = wgLiberi.indexOf(n) >= 0;
+                        const sel = isSelectedPaese && wg === n;
+                        return (
+                          <span key={n}
+                            className={"slot-wg-pill " + (sel ? "selected-wg" : libero ? "libero" : "occupato")}
+                            onClick={function(e) {
+                              e.stopPropagation();
+                              if (libero) { setPaeseId(p.id); setWg(n); }
+                            }}>
+                            WG{n}{n === 4 ? "★" : ""}
+                          </span>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          <div className="form-help">I WG barrati sono già occupati. Il simbolo ★ indica il WG 4 (Delegato Capo). Se tutti gli slot del paese sono occupati, il riquadro è disabilitato.</div>
+        </div>
+
+        {paeseId && wg && (
+          <div style={{ padding: "12px 14px", background: "#fffbef", border: "1px solid var(--oro)", borderRadius: 4, fontSize: 13, marginBottom: 16 }}>
+            Stai per registrarti come <strong>{paeseObj.emoji} {paeseObj.nome} ({paeseObj.ente})</strong> — WG {wg} {wg === 4 ? <em>+ Delegato Capo</em> : null}.
+          </div>
+        )}
+
+        {errore && <div className="form-error" style={{ marginBottom: 8 }}>{errore}</div>}
+
+        <div style={{ display: "flex", gap: 8 }}>
+          <button className="btn btn-primary" onClick={registra} disabled={submitting || loading}>
+            {submitting ? "Registro..." : "Registrati"}
+          </button>
+          <button className="btn btn-ghost" onClick={onBack}>Indietro</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+// ═══════════════════════════════════════════════════════════════════════════
+// STUDENTE APP
+// ═══════════════════════════════════════════════════════════════════════════
+function StudenteApp({ studente: initialStudente, onUpdate }) {
+  const [studente, setStudente] = useState(initialStudente);
+  const [view, setView] = useState("home");
+  const wgData = WG_DATA[studente.wg];
+
+  // Poll periodico: aggiorna lo studente dal backend per rilevare modifiche del docente
+  useEffect(function() {
+    const timer = setInterval(async function() {
+      const res = await apiCall("get_studente", { id: studente.id });
+      if (res.ok) {
+        // Aggiorna solo se ci sono differenze rilevanti (per evitare sovrascrivere
+        // modifiche locali in corso)
+        const s = res.studente;
+        if (JSON.stringify(s.sezioniVisitate) !== JSON.stringify(studente.sezioniVisitate) ||
+            s.completato !== studente.completato ||
+            s.ballotVoto !== studente.ballotVoto) {
+          // Modifiche sensate provengono dal client stesso: non sovrascriviamo
+        }
+      }
+    }, 30000);
+    return function() { clearInterval(timer); };
+  }, [studente.id]);
+
+  const aggiornaStudente = async function(updates) {
+    const updated = { ...studente, ...updates };
+    setStudente(updated);
+    sessionStorage.setItem(STORAGE_SESSIONE, JSON.stringify(updated));
+    if (onUpdate) onUpdate(updated);
+    await apiCall("aggiorna_studente", { id: updated.id, ...updates });
+  };
+
+  const segnaVisitata = async function(sezioneId) {
+    if (!(studente.sezioniVisitate || []).includes(sezioneId)) {
+      const nuove = [...(studente.sezioniVisitate || []), sezioneId];
+      await aggiornaStudente({ sezioniVisitate: nuove });
+    }
+  };
+
+  const tutteVisitate = wgData.sezioni.every(function(s) {
+    return (studente.sezioniVisitate || []).includes(s.id);
+  });
+
+  const tabs = [
+    ["home", "🏠 Home"],
+    ["scheda", "📋 Scheda WG"],
+    ["ballot", "🗳️ Ballot"],
+    ["delegazione", "🤝 Delegazione"],
+    ["nwip", "📄 NWIP"],
+    ["glossario", "📖 Glossario"],
+  ];
+
+  return (
+    <div className="main">
+      <div style={{ display: "flex", gap: 6, marginBottom: 20, flexWrap: "wrap", paddingTop: 12 }}>
+        {tabs.map(function(tab) {
+          const v = tab[0], l = tab[1];
+          return (
+            <button key={v} onClick={function() { setView(v); }}
+              style={{
+                padding: "6px 14px", border: "1px solid var(--bordo)", borderRadius: 20,
+                fontFamily: "Syne, sans-serif", fontWeight: 600, fontSize: 12, cursor: "pointer",
+                background: view === v ? wgData.colore : "white",
+                color: view === v ? "white" : "var(--testo-light)",
+                borderColor: view === v ? wgData.colore : "var(--bordo)",
+                transition: "all 0.15s"
+              }}>{l}</button>
+          );
+        })}
+      </div>
+
+      {view === "home"        && <StudenteHome studente={studente} wgData={wgData} tutteVisitate={tutteVisitate} onMarca={function() { aggiornaStudente({ completato: true }); }} onGo={setView} />}
+      {view === "scheda"      && <StudenteScheda studente={studente} wgData={wgData} segnaVisitata={segnaVisitata} />}
+      {view === "ballot"      && <StudenteBallot studente={studente} wgData={wgData} aggiornaStudente={aggiornaStudente} />}
+      {view === "delegazione" && <StudenteDelegazione studente={studente} aggiornaStudente={aggiornaStudente} />}
+      {view === "nwip"        && <NwipView />}
+      {view === "glossario"   && <GlossarioView />}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// STUDENTE: HOME
+// ═══════════════════════════════════════════════════════════════════════════
+function StudenteHome({ studente, wgData, tutteVisitate, onMarca, onGo }) {
+  const prog = (studente.sezioniVisitate || []).length / wgData.sezioni.length;
+  const haSintesi = !!(studente.sintesiPosizione && studente.sintesiPosizione.trim().length > 10);
+  const haVoto = !!studente.ballotVoto;
+
+  return (
+    <>
+      <div className="card">
+        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}>
+          <div>
+            <div style={{ fontSize: 11, color: "var(--testo-light)", fontFamily: "Syne, sans-serif", fontWeight: 600, letterSpacing: "0.08em", marginBottom: 4 }}>BENVENUTO</div>
+            <div style={{ fontFamily: "Syne, sans-serif", fontWeight: 800, fontSize: 22, color: "var(--blu)" }}>{studente.emoji} {studente.nome} {studente.cognome}</div>
+            <div style={{ fontSize: 13, color: "var(--testo-light)", marginTop: 4 }}>{studente.paeseName} / {studente.ente}</div>
+          </div>
+          <div>
+            <span className="wg-badge" style={{ background: wgData.colore }}>WG {studente.wg}</span>
+            {studente.isDelegatoCapo && <div style={{ marginTop: 4 }}><span className="tag tag-oro">Delegato Capo</span></div>}
+          </div>
+        </div>
+        <hr className="divider" />
+        <div style={{ fontFamily: "Syne, sans-serif", fontWeight: 700, fontSize: 13, color: "var(--testo-light)", marginBottom: 4, textTransform: "uppercase", letterSpacing: "0.06em" }}>{wgData.titolo}</div>
+        <div style={{ fontSize: 14, color: "var(--testo)", marginBottom: 12 }}>{wgData.sottotitolo}</div>
+        <div style={{ fontSize: 12, color: "var(--testo-light)", marginBottom: 4 }}>Avanzamento scheda: {(studente.sezioniVisitate || []).length}/{wgData.sezioni.length} sezioni visitate</div>
+        <div className="progress-bar"><div className="progress-fill" style={{ width: (prog * 100) + "%", background: wgData.colore }} /></div>
+      </div>
+
+      {studente.completato ? (
+        <div className="completamento-box">
+          <div className="completamento-icon">✅</div>
+          <div className="completamento-title">Preparazione dichiarata completata</div>
+          <div className="completamento-sub">Hai completato la preparazione individuale.<br />Porta la scheda WG cartacea e il Ballot Sheet alla plenaria.<br />{studente.isDelegatoCapo && <>In qualità di Delegato Capo, coordina la delegazione prima dell'appello nominale.</>}</div>
+        </div>
+      ) : (
+        <div className="card">
+          <div className="card-title">Cosa devi fare</div>
+          {studente.isDelegatoCapo && (
+            <div style={{ marginBottom: 14, padding: "10px 12px", background: "#fff8e7", border: "1px solid #d9b96a", borderLeft: "4px solid #c9a14a", borderRadius: 4, fontSize: 12, lineHeight: 1.55, color: "#6e4e0e" }}>
+              <strong>📜 Nota per il Delegato Capo.</strong> Oltre alle attività elencate qui sotto, accedi alla tab <strong>Delegazione</strong> per leggere le posizioni dei tuoi tre compagni e coordinare il voto ufficiale del paese.
+            </div>
+          )}
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {[
+              { icon: "📋", titolo: "Studia la scheda WG",             desc: "Leggi tutte le sezioni: contesto, fonti, riflessioni, conflitto", tab: "scheda", fatto: (studente.sezioniVisitate || []).length > 0 && (studente.sezioniVisitate || []).length === wgData.sezioni.length },
+              { icon: "✍️", titolo: "Scrivi la sintesi della posizione", desc: "3-4 righe nella tab Delegazione, visibile ai compagni di paese",    tab: "delegazione", fatto: haSintesi },
+              { icon: "🗳️", titolo: "Esprimi il voto preliminare",      desc: "Scegli A / AC / D / AB nella tab Ballot",                          tab: "ballot", fatto: haVoto },
+              { icon: "📝", titolo: "Prepara i materiali cartacei",     desc: "Scheda WG + Ballot Sheet + 2 domande da porre in plenaria",         fatto: false },
+            ].map(function(item, i) {
+              return (
+                <div key={i} style={{ display: "flex", gap: 10, padding: "10px 0", borderBottom: i < 3 ? "1px solid var(--bordo)" : "none" }}>
+                  <div style={{ fontSize: 20, flexShrink: 0 }}>{item.fatto ? "✅" : item.icon}</div>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontFamily: "Syne, sans-serif", fontWeight: 600, fontSize: 13, color: item.fatto ? "var(--verde)" : "var(--testo)" }}>{item.titolo}</div>
+                    <div style={{ fontSize: 12, color: "var(--testo-light)" }}>{item.desc}</div>
+                  </div>
+                  {item.tab && !item.fatto && <button className="btn btn-ghost btn-sm" onClick={function() { onGo(item.tab); }}>Vai →</button>}
+                </div>
+              );
+            })}
+          </div>
+          {tutteVisitate && haSintesi && haVoto && !studente.completato && (
+            <>
+              <hr className="divider" />
+              <button className="btn btn-primary btn-full" onClick={onMarca}>✅ Dichiaro di aver completato la preparazione</button>
+              <div style={{ fontSize: 11, color: "var(--testo-light)", textAlign: "center", marginTop: 6 }}>Porta comunque la scheda cartacea e il Ballot Sheet alla plenaria</div>
+            </>
+          )}
+        </div>
+      )}
+    </>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// STUDENTE: SCHEDA WG
+// ═══════════════════════════════════════════════════════════════════════════
+function StudenteScheda({ studente, wgData, segnaVisitata }) {
+  const [sezioneAttiva, setSezioneAttiva] = useState(wgData.sezioni[0].id);
+  const sezione = wgData.sezioni.filter(function(s) { return s.id === sezioneAttiva; })[0];
+  useEffect(function() { segnaVisitata(sezioneAttiva); }, [sezioneAttiva]);
+
+  const icon = { contesto: "📖 Contesto", ricerca: "🔍 Fonti", domande: "💭 Riflessioni", conflitto: "⚡ Conflitto" };
+
+  return (
+    <div>
+      <div className="card" style={{ borderTop: "4px solid " + wgData.colore, paddingBottom: 12 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
+          <span className="wg-badge" style={{ background: wgData.colore }}>WG {studente.wg}</span>
+          <div style={{ fontFamily: "Syne, sans-serif", fontWeight: 700, fontSize: 16, color: "var(--blu)" }}>{wgData.titolo}</div>
+        </div>
+        <div style={{ fontSize: 13, color: "var(--testo-light)" }}>{wgData.domandaCentrale}</div>
+      </div>
+
+      <div className="sezione-nav">
+        {wgData.sezioni.map(function(s) {
+          return (
+            <button key={s.id}
+              className={"sezione-tab " + (sezioneAttiva === s.id ? "attiva" : "")}
+              style={sezioneAttiva === s.id ? { background: wgData.colore, borderColor: wgData.colore } : {}}
+              onClick={function() { setSezioneAttiva(s.id); }}>{icon[s.id]}</button>
+          );
+        })}
+      </div>
+
+      <div className="card">
+        <div className="card-title">{sezione.titolo}</div>
+        {sezione.tipo === "info" && <div className="info-box">{sezione.contenuto}</div>}
+        {sezione.tipo === "fonti" && (
+          <>
+            <div className="card-sub">Consulta almeno 2 di queste fonti prima di scrivere la posizione del tuo paese. Cita le fonti sulla scheda cartacea.</div>
+            {sezione.fonti.map(function(f, i) {
+              return (
+                <a key={i} href={f.url} target="_blank" rel="noopener noreferrer" className="fonte-link">
+                  <div className="fonte-link-icon">🔗</div>
+                  <div>
+                    <div className="fonte-link-testo">{f.testo}</div>
+                    <div className="fonte-link-url">{f.url}</div>
+                  </div>
+                </a>
+              );
+            })}
+          </>
+        )}
+        {sezione.tipo === "domande" && (
+          <>
+            <div className="card-sub">Queste domande ti guidano nella costruzione della posizione del tuo paese. Non hanno una risposta giusta: servono ad aiutarti a ragionare prima di scrivere.</div>
+            {sezione.domande.map(function(d, i) { return <div key={i} className="domanda-item">{d}</div>; })}
+            <div style={{ marginTop: 12, padding: "12px", background: "#f5f2eb", borderRadius: 4, fontSize: 12, color: "var(--testo-light)" }}>
+              💡 La posizione scritta va redatta su carta (min. 15 righe). Usa «deve» per gli obblighi e «dovrebbe» per le raccomandazioni.
+            </div>
+          </>
+        )}
+        {sezione.tipo === "conflitto" && (
+          <>
+            <div className="conflitto-box">
+              <div className="conflitto-titolo">⚡ Il conflitto da affrontare in plenaria</div>
+              <div className="conflitto-testo">{sezione.testo}</div>
+            </div>
+            <div className="iniezione-box">
+              <div className="iniezione-label">DOMANDA DI INIEZIONE DEL CHAIR (se il conflitto non emerge spontaneamente)</div>
+              {sezione.domandaIniezione}
+            </div>
+            <div style={{ marginTop: 12, padding: "10px 12px", background: "#fff8f0", border: "1px solid var(--oro)", borderRadius: 4, fontSize: 12 }}>
+              🎯 <strong>Suggerimento:</strong> Prepara almeno 2 domande da porre agli altri paesi in plenaria su questo tema. Scrivile sulla scheda cartacea.
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// STUDENTE: BALLOT
+// ═══════════════════════════════════════════════════════════════════════════
+function StudenteBallot({ studente, wgData, aggiornaStudente }) {
+  const [voto, setVoto] = useState(studente.ballotVoto || null);
+  const [motivazione, setMotivazione] = useState(studente.ballotMotivazione || "");
+  const [salvato, setSalvato] = useState(false);
+
+  const opzioni = [
+    { sigla: "A",  nome: "APPROVE",               desc: "Approvo la NWIP senza condizioni" },
+    { sigla: "AC", nome: "APPROVE WITH COMMENTS", desc: "Approvo ma ho commenti tecnici da allegare" },
+    { sigla: "D",  nome: "DISAPPROVE",            desc: "Mi oppongo formalmente (devo motivare per iscritto)" },
+    { sigla: "AB", nome: "ABSTAIN",               desc: "Mi astengo (non conta nel calcolo delle soglie)" },
+  ];
+
+  const handleVoto = function(v) { setVoto(v); setSalvato(false); };
+
+  const salva = async function() {
+    await aggiornaStudente({ ballotVoto: voto, ballotMotivazione: motivazione });
+    // Registra anche il voto preliminare della delegazione se è il Delegato Capo
+    if (studente.isDelegatoCapo) {
+      await apiCall("set_voto_prelim", { paese: studente.paese, voto: voto });
+    }
+    setSalvato(true);
+    setTimeout(function() { setSalvato(false); }, 2000);
+  };
+
+  return (
+    <div>
+      <div className="card">
+        <div className="card-title">🗳️ Ballot Sheet — Voto preliminare</div>
+        <div className="card-sub">Esprimi il tuo voto preliminare sulla NWIP. Il voto che conta è quello dichiarato oralmente in plenaria: questo voto preliminare serve per la preparazione e per la coerenza di delegazione.{studente.isDelegatoCapo && <> In quanto <strong>Delegato Capo</strong>, il tuo voto preliminare costituisce la prima posizione ufficiale del paese.</>}</div>
+
+        <div className="ballot-opzioni">
+          {opzioni.map(function(o) {
+            return (
+              <div key={o.sigla} className={"ballot-opzione " + (voto === o.sigla ? "selezionata " + o.sigla : "")} onClick={function() { handleVoto(o.sigla); }}>
+                <div className={"ballot-sigla " + o.sigla}>{o.sigla}</div>
+                <div className="ballot-nome">{o.nome}</div>
+                <div className="ballot-desc">{o.desc}</div>
+              </div>
+            );
+          })}
+        </div>
+
+        {voto && (
+          <div style={{ padding: "12px 14px", background: "var(--bg)", border: "1px solid var(--bordo)", borderRadius: 4, marginTop: 8, marginBottom: 12 }}>
+            <div style={{ fontFamily: "Syne, sans-serif", fontWeight: 700, fontSize: 12, marginBottom: 6, color: "var(--testo-light)", textTransform: "uppercase", letterSpacing: "0.06em" }}>Hai selezionato: {voto}</div>
+            {voto === "A"  && <div style={{ fontSize: 13, lineHeight: 1.6 }}>Stai approvando la NWIP senza riserve. Motiva comunque per iscritto perché la delegazione ritiene che valga la pena avviare questo lavoro normativo.</div>}
+            {voto === "AC" && <div style={{ fontSize: 13, lineHeight: 1.6 }}>Stai approvando con commenti. <strong>È obbligatorio</strong> allegare i commenti tecnici. I commenti devono essere specifici al tema del tuo WG.</div>}
+            {voto === "D"  && <div style={{ fontSize: 13, lineHeight: 1.6 }}>Stai votando contro. <strong>È obbligatorio</strong> allegare una motivazione tecnica. Un D senza motivazione non è formalmente valido nelle ISO Directives.</div>}
+            {voto === "AB" && <div style={{ fontSize: 13, lineHeight: 1.6 }}>Ti stai astenendo. Il tuo voto non entrerà nel calcolo delle soglie. Spiega comunque le ragioni dell'astensione.</div>}
+          </div>
+        )}
+
+        <div className="form-group">
+          <label className="form-label">Motivazione sintetica (per il backend — la motivazione completa va sulla scheda cartacea)</label>
+          <textarea className="form-input form-textarea" value={motivazione} onChange={function(e) { setMotivazione(e.target.value); }} placeholder="Spiega brevemente perché il tuo paese vota così..." />
+        </div>
+
+        <button className="btn btn-primary" onClick={salva} disabled={!voto}>
+          {salvato ? "✓ Salvato" : "Salva voto preliminare"}
+        </button>
+      </div>
+
+      <div className="card">
+        <div className="card-title">Le soglie ISO per l'approvazione</div>
+        <div className="card-sub">La NWIP è approvata solo se si verificano contemporaneamente tutte e tre le condizioni:</div>
+        <div className="soglia-row"><span>Voti favorevoli (A + AC) ≥ 2/3 dei voti espressi</span><span style={{ color: "var(--testo-light)" }}>es. 4 su 6</span></div>
+        <div className="soglia-row"><span>Voti contrari (D) ≤ 1/4 dei voti espressi</span><span style={{ color: "var(--testo-light)" }}>es. max 1–2 su 6</span></div>
+        <div className="soglia-row" style={{ borderBottom: "none" }}><span>Quorum: almeno 5 paesi votanti (A+AC+D+AB)</span><span style={{ color: "var(--testo-light)" }}>AB conta per il quorum</span></div>
+      </div>
+
+      <div className="card">
+        <div className="card-title">Cosa portare alla plenaria</div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 13 }}>
+          <div>📄 Scheda WG compilata su carta (tutte le sezioni)</div>
+          <div>🗳️ Ballot Sheet cartaceo compilato (voto + motivazione)</div>
+          <div>❓ Almeno 2 domande da porre agli altri paesi</div>
+          {studente.isDelegatoCapo && <div>📊 Riepilogo posizioni della delegazione (scheda WG 4 sezione 5)</div>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// STUDENTE: DELEGAZIONE — Vista completa (Blocco 4)
+// ═══════════════════════════════════════════════════════════════════════════
+function StudenteDelegazione({ studente, aggiornaStudente }) {
+  const [delegazione, setDelegazione] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [sintesi, setSintesi] = useState(studente.sintesiPosizione || "");
+  const [salvato, setSalvato] = useState(false);
+
+  const carica = async function() {
+    setLoading(true);
+    const res = await apiCall("lista_delegazione", { paese: studente.paese });
+    if (res.ok) setDelegazione(res.delegazione || []);
+    setLoading(false);
+  };
+
+  useEffect(function() {
+    carica();
+    const timer = setInterval(carica, 15000); // refresh ogni 15 s
+    return function() { clearInterval(timer); };
+  }, [studente.paese]);
+
+  const salvaSintesi = async function() {
+    await aggiornaStudente({ sintesiPosizione: sintesi });
+    setSalvato(true);
+    setTimeout(function() { setSalvato(false); }, 2000);
+    carica(); // rilegge per aggiornare la vista
+  };
+
+  const paeseObj = PAESI.filter(function(p) { return p.id === studente.paese; })[0];
+
+  // Analisi coerenza locale (visibile allo studente)
+  const votiEspressi = delegazione.filter(function(d) { return d.ballotVoto; }).map(function(d) { return d.ballotVoto; });
+  const uniciVoti = [...new Set(votiEspressi)];
+  const haTensione = uniciVoti.length > 1;
+
+  return (
+    <div>
+      <div className="card" style={{ borderTop: "4px solid var(--viola)" }}>
+        <div className="card-title">🤝 La tua delegazione: {paeseObj.emoji} {paeseObj.nome} ({paeseObj.ente})</div>
+        <div className="card-sub">Qui vedi le sintesi di posizione di tutti e quattro i membri della delegazione, aggiornate in tempo reale. La posizione ufficiale del paese è determinata dal Delegato Capo (WG 4) sulla base dei contributi dei tre esperti.</div>
+
+        {loading ? <div className="loading">Carico le posizioni della delegazione...</div> : (
+          <div className="delegazione-grid">
+            {[1,2,3,4].map(function(w) {
+              const membro = delegazione.filter(function(d) { return parseInt(d.wg) === w; })[0];
+              const isSelf = membro && membro.id === studente.id;
+              if (!membro) {
+                return (
+                  <div key={w} className="delegazione-slot vuoto">
+                    <div className="delegazione-wg">WG {w} {w === 4 ? "★" : ""}</div>
+                    <div style={{ fontSize: 12, marginTop: 8 }}>— posto non ancora occupato —</div>
+                  </div>
+                );
+              }
+              return (
+                <div key={w} className={"delegazione-slot " + (isSelf ? "self " : "") + (w === 4 ? "capo" : "")}>
+                  <div className="delegazione-wg">WG {w} {w === 4 ? "★ Delegato Capo" : ""}</div>
+                  <div className="delegazione-nome">{membro.nome} {membro.cognome}</div>
+                  <div className="delegazione-sintesi">
+                    {membro.sintesiPosizione
+                      ? membro.sintesiPosizione
+                      : <span style={{ color: "var(--testo-light)", fontStyle: "italic" }}>Posizione non ancora pubblicata</span>}
+                  </div>
+                  <div className="delegazione-voto">
+                    {membro.ballotVoto
+                      ? <span>Voto preliminare: <span className={"ballot-sigla " + membro.ballotVoto} style={{ fontSize: 13 }}>{membro.ballotVoto}</span></span>
+                      : <span style={{ color: "var(--testo-light)" }}>Voto non ancora espresso</span>}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {haTensione && (
+          <div style={{ marginTop: 14, padding: "10px 12px", background: "#fff4e0", border: "1px solid var(--arancio)", borderLeft: "3px solid var(--arancio)", borderRadius: 4, fontSize: 12, lineHeight: 1.5 }}>
+            <strong style={{ color: "var(--arancio)" }}>⚠ Attenzione — tensione interna alla delegazione.</strong> All'interno della delegazione ci sono voti preliminari diversi ({uniciVoti.join(", ")}). Confrontatevi prima della plenaria: il Delegato Capo dovrà comunque portare un unico voto ufficiale.
+          </div>
+        )}
+      </div>
+
+      <div className="card">
+        <div className="card-title">✍️ La tua sintesi di posizione</div>
+        <div className="card-sub">Scrivi qui 3-4 righe che sintetizzano la posizione del tuo paese sul tema del tuo WG. Questa sintesi sarà visibile a tutti i membri della delegazione.</div>
+        <textarea
+          className="form-input form-textarea"
+          value={sintesi}
+          onChange={function(e) { setSintesi(e.target.value); }}
+          placeholder={
+            studente.wg === 1 ? "Es: L'Italia ritiene che il Remote ID debba trasmettere l'identificativo del drone e la sua posizione GPS, ma non la posizione dell'operatore a terra per ragioni di tutela della privacy (GDPR)..." :
+            studente.wg === 2 ? "Es: L'Italia propone di mantenere la soglia a 250 g per garantire piena copertura della norma anche ai droni consumer più leggeri usati in ambito urbano..." :
+            studente.wg === 3 ? "Es: L'Italia ritiene che l'esame sia obbligatorio solo per l'uso commerciale; per l'uso ricreativo è sufficiente un corso online con autocertificazione..." :
+            "Es: L'Italia sostiene un campo di applicazione uniforme tra area urbana e rurale, per garantire applicabilità della norma e semplicità di interpretazione..."
+          }
+          style={{ minHeight: 120 }}
+        />
+        <div style={{ display: "flex", gap: 8, marginTop: 12, alignItems: "center" }}>
+          <button className="btn btn-primary" onClick={salvaSintesi} disabled={!sintesi.trim()}>
+            {salvato ? "✓ Sintesi pubblicata" : "Pubblica la sintesi"}
+          </button>
+          <span style={{ fontSize: 11, color: "var(--testo-light)" }}>Puoi modificare la sintesi in qualsiasi momento prima della plenaria.</span>
+        </div>
+      </div>
+
+      {studente.isDelegatoCapo && (
+        <div className="card" style={{ borderTop: "3px solid var(--oro)", background: "linear-gradient(to bottom, #fffbef 0%, white 30%)" }}>
+          <div className="card-title" style={{ color: "#6e4e0e" }}>📜 Promemoria per il Delegato Capo</div>
+          <div style={{ fontSize: 13, lineHeight: 1.65, color: "var(--testo)" }}>
+            Il tuo compito in plenaria è portare <strong>un solo voto ufficiale</strong> per l'intera delegazione. Prima della sessione plenaria:
+            <ol style={{ marginTop: 10, paddingLeft: 24, lineHeight: 1.7 }}>
+              <li>Leggi con attenzione tutte e tre le sintesi dei tuoi compagni qui sopra.</li>
+              <li>Verifica che le posizioni siano coerenti. Se ci sono divergenze (es. WG 2 vuole A, tu voterai D), discuti con la delegazione prima dell'appello nominale.</li>
+              <li>Compila la sezione 5 della tua scheda cartacea con il riepilogo delle posizioni.</li>
+              <li>Prepara un intervento di 3 minuti per presentare il voto e i commenti principali del paese.</li>
+            </ol>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+// ═══════════════════════════════════════════════════════════════════════════
+// NWIP View e GLOSSARIO (condivisi)
+// ═══════════════════════════════════════════════════════════════════════════
+function NwipView() {
+  return (
+    <div>
+      <div className="nwip-box">
+        <div className="nwip-label">NEW WORK ITEM PROPOSAL — ISO/TC 20/SC 16 N-XXX</div>
+        <div className="nwip-titolo">Aerospace — Unmanned Aircraft Systems (UAS) — Minimum requirements for remote identification, operational limits, operator certification and scope of application in non-segregated civil airspace</div>
+        <div className="nwip-row"><span className="nwip-key">Proponente:</span><span>AFNOR (Francia)</span></div>
+        <div className="nwip-row"><span className="nwip-key">Co-proponenti:</span><span>DIN (Germania), JSA (Giappone)</span></div>
+        <div className="nwip-row" style={{ marginTop: 8 }}><span className="nwip-key">Motivazione:</span><span>EASA (Reg. UE 2019/945) e FAA (14 CFR Part 107) hanno sviluppato requisiti tecnici parzialmente divergenti. Una norma ISO armonizzata fornirebbe una base tecnica comune.</span></div>
+        <div className="nwip-row" style={{ marginTop: 8 }}><span className="nwip-key">Scope:</span><span>UAS con MTOW tra 250 g e 25 kg in spazio aereo civile non segregato (VLOS e BVLOS), uso commerciale e ricreativo avanzato.</span></div>
+        <div className="nwip-row"><span className="nwip-key">Esclusi:</span><span>MTOW &lt; 250 g · droni militari · spazio aereo segregato</span></div>
+      </div>
+      <div className="card">
+        <div className="card-title">I 4 temi in discussione</div>
+        {Object.entries(WG_DATA).map(function(entry) {
+          const num = entry[0], wg = entry[1];
+          return (
+            <div key={num} style={{ padding: "12px 0", borderBottom: num < 4 ? "1px solid var(--bordo)" : "none" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+                <span className="wg-badge" style={{ background: wg.colore, fontSize: 10 }}>WG {num}</span>
+                <span style={{ fontFamily: "Syne, sans-serif", fontWeight: 700, fontSize: 13 }}>{wg.titolo}</span>
+              </div>
+              <div style={{ fontSize: 12, color: "var(--testo-light)" }}>Conflitto: {wg.conflitto}</div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function GlossarioView() {
+  const [cerca, setCerca] = useState("");
+  const filtrati = GLOSSARIO.filter(function(g) {
+    return g.termine.toLowerCase().includes(cerca.toLowerCase()) ||
+           g.def.toLowerCase().includes(cerca.toLowerCase());
+  });
+  return (
+    <div>
+      <div className="card">
+        <div className="card-title">📖 Glossario ISO / UAS</div>
+        <input className="form-input" placeholder="Cerca termine..." value={cerca} onChange={function(e) { setCerca(e.target.value); }} style={{ marginBottom: 12 }} />
+        {filtrati.map(function(g, i) {
+          return (
+            <div key={i} className="glossario-item">
+              <div className="glossario-termine">{g.termine}</div>
+              <div className="glossario-def">{g.def}</div>
+            </div>
+          );
+        })}
+        {filtrati.length === 0 && <div style={{ fontSize: 13, color: "var(--testo-light)" }}>Nessun termine trovato.</div>}
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// DOCENTE LOGIN — verifica codice docente (server-side)
+// ═══════════════════════════════════════════════════════════════════════════
+function DocenteLogin({ onLogin, onBack }) {
+  const [codice, setCodice] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [errore, setErrore] = useState("");
+
+  const verifica = async function() {
+    const codiceTrim = (codice || "").trim();
+    if (!codiceTrim) {
+      setErrore("Inserisci il codice docente.");
+      return;
+    }
+    setLoading(true);
+    setErrore("");
+    // Salva il codice in sessionStorage: apiCall lo inietterà come docenteCode
+    // nella richiesta di verifica e in ogni chiamata successiva.
+    try { sessionStorage.setItem(STORAGE_DOCENTE_PWD, codiceTrim); } catch (e) {}
+    const res = await apiCall("verifica_docente", {});
+    if (res.ok && res.autorizzato) {
+      onLogin(res.email || "docente");
+    } else if (res.ok && !res.autorizzato) {
+      try { sessionStorage.removeItem(STORAGE_DOCENTE_PWD); } catch (e) {}
+      setErrore("Codice non riconosciuto. Verifica di averlo digitato correttamente (maiuscole/minuscole comprese).");
+    } else {
+      try { sessionStorage.removeItem(STORAGE_DOCENTE_PWD); } catch (e) {}
+      setErrore(res.errore || "Errore di verifica. Controlla la connessione e la configurazione di APPS_SCRIPT_URL.");
+    }
+    setLoading(false);
+  };
+
+  const onKeyDown = function(ev) {
+    if (ev.key === "Enter" && !loading) verifica();
+  };
+
+  return (
+    <div className="main" style={{ paddingTop: 32 }}>
+      <div className="card">
+        <div className="card-title">🔐 Accesso Docente</div>
+        <div className="card-sub">L'accesso al pannello docente è riservato tramite codice segreto. Il codice è configurato dal docente nel backend Apps Script (costante <code>DOCENTE_CODE</code>) e va inserito qui sotto.</div>
+
+        {MODALITA_OFFLINE_TEST && (
+          <div style={{ padding: 12, background: "#fff4d4", border: "1px solid #d9b96a", borderRadius: 4, fontSize: 12, marginBottom: 16 }}>
+            <strong>Modalità offline test attiva.</strong> Il backend Apps Script non è ancora configurato. In questa modalità l'accesso è consentito senza verifica per consentire lo sviluppo. In produzione impostare APPS_SCRIPT_URL.
+          </div>
+        )}
+
+        <div style={{ marginBottom: 12 }}>
+          <label className="form-label" htmlFor="docente-code-input">Codice docente</label>
+          <input
+            id="docente-code-input"
+            type="password"
+            className="form-input"
+            value={codice}
+            onChange={function(e) { setCodice(e.target.value); }}
+            onKeyDown={onKeyDown}
+            placeholder="Inserisci il codice"
+            autoFocus
+            disabled={loading}
+          />
+        </div>
+
+        <button className="btn btn-primary btn-lg btn-full" onClick={verifica} disabled={loading}>
+          {loading ? "Verifica in corso..." : "🔓 Accedi"}
+        </button>
+
+        {errore && (
+          <div style={{ marginTop: 12, padding: 12, background: "#f9e4e4", border: "1px solid var(--rosso)", borderRadius: 4, fontSize: 13, color: "var(--rosso)", lineHeight: 1.5 }}>
+            {errore}
+          </div>
+        )}
+
+        <div style={{ marginTop: 16, padding: 12, background: "var(--bg)", borderRadius: 4, fontSize: 12, lineHeight: 1.5, color: "var(--testo-light)" }}>
+          <strong>Come funziona:</strong> il codice viene inviato al backend Apps Script e confrontato con la costante <code>DOCENTE_CODE</code>. Se coincide, l'accesso è autorizzato e il codice viene conservato in sessionStorage per tutta la sessione del browser, in modo che le operazioni docente successive (registro, scrutinio, reset, ecc.) vengano eseguite senza dover reinserire il codice ogni volta. Al logout il codice viene rimosso.
+        </div>
+
+        <button className="btn btn-ghost btn-sm" onClick={onBack} style={{ marginTop: 16 }}>← Torna alla landing</button>
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// DOCENTE APP — Dashboard multi-tab
+// ═══════════════════════════════════════════════════════════════════════════
+function DocenteApp({ email }) {
+  const [tab, setTab] = useState("registro");
+  const [studenti, setStudenti] = useState([]);
+  const [votiBackend, setVotiBackend] = useState([]); // righe dal foglio plenaria
+  const [loadingStudenti, setLoadingStudenti] = useState(true);
+  const [loadingVoti, setLoadingVoti] = useState(true);
+
+  const caricaStudenti = async function() {
+    setLoadingStudenti(true);
+    const res = await apiCall("tutti_studenti", {});
+    if (res.ok) setStudenti(res.studenti || []);
+    setLoadingStudenti(false);
+  };
+
+  const caricaVoti = async function() {
+    setLoadingVoti(true);
+    const res = await apiCall("get_voti", {});
+    if (res.ok) setVotiBackend(res.voti || []);
+    setLoadingVoti(false);
+  };
+
+  useEffect(function() {
+    caricaStudenti();
+    caricaVoti();
+    // Auto-refresh ogni 20 s
+    const timer = setInterval(function() { caricaStudenti(); caricaVoti(); }, 20000);
+    return function() { clearInterval(timer); };
+  }, []);
+
+  const tabs = [
+    ["registro",    "👥 Registro"],
+    ["sintesi",     "✍️ Sintesi"],
+    ["pannello",    "🎙️ Pannello Chair"],
+    ["plenaria",    "🗳️ Scrutinio"],
+    ["risultato",   "📊 Risultato"],
+    ["diagnostica", "🔍 Diagnostica"],
+    ["debriefing",  "💬 Debriefing"],
+    ["archivio",    "📚 Archivio"],
+    ["impostazioni","⚙️ Impostazioni"],
+  ];
+
+  return (
+    <div className="main main-xwide">
+      <div className="doc-tabs">
+        {tabs.map(function(t) {
+          return (
+            <div key={t[0]} className={"doc-tab " + (tab === t[0] ? "attiva" : "")} onClick={function() { setTab(t[0]); }}>{t[1]}</div>
+          );
+        })}
+      </div>
+
+      {tab === "registro"     && <DocenteRegistro studenti={studenti} loading={loadingStudenti} ricarica={caricaStudenti} />}
+      {tab === "sintesi"      && <DocenteSintesi />}
+      {tab === "pannello"     && <DocentePannelloChair studenti={studenti} votiBackend={votiBackend} ricaricaVoti={caricaVoti} ricaricaStudenti={caricaStudenti} />}
+      {tab === "plenaria"     && <DocentePlenaria votiBackend={votiBackend} ricaricaVoti={caricaVoti} />}
+      {tab === "risultato"    && <DocenteRisultato studenti={studenti} votiBackend={votiBackend} />}
+      {tab === "diagnostica"  && <DocenteDiagnostica />}
+      {tab === "debriefing"   && <DocenteDebriefing />}
+      {tab === "archivio"     && <DocenteArchivio votiBackend={votiBackend} />}
+      {tab === "impostazioni" && <DocenteImpostazioni studenti={studenti} votiBackend={votiBackend} ricarica={function() { caricaStudenti(); caricaVoti(); }} />}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// DOCENTE / REGISTRO
+// ═══════════════════════════════════════════════════════════════════════════
+function DocenteRegistro({ studenti, loading, ricarica }) {
+  const [studenteInModifica, setStudenteInModifica] = useState(null);
+
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+        <div>
+          <div style={{ fontFamily: "Syne, sans-serif", fontWeight: 700, fontSize: 16, color: "var(--blu)" }}>Registro della classe</div>
+          <div style={{ fontSize: 13, color: "var(--testo-light)" }}>{studenti.length} studenti registrati · clicca su uno studente per modificare</div>
+        </div>
+        <button className="btn btn-ghost btn-sm" onClick={ricarica}>🔄 Aggiorna</button>
+      </div>
+
+      {studenteInModifica && (
+        <ModaleModificaStudente
+          studente={studenteInModifica}
+          onSalva={async function(aggiornato) {
+            await apiCall("modifica_studente", aggiornato);
+            setStudenteInModifica(null);
+            ricarica();
+          }}
+          onElimina={async function() {
+            await apiCall("elimina_studente", { id: studenteInModifica.id });
+            setStudenteInModifica(null);
+            ricarica();
+          }}
+          onChiudi={function() { setStudenteInModifica(null); }}
+        />
+      )}
+
+      {loading ? <div className="loading">Caricamento studenti...</div> : (
+        <>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: 10, marginBottom: 20 }}>
+            {PAESI.map(function(p) {
+              const stP = studenti.filter(function(s) { return s.paese === p.id; });
+              const pronti = stP.filter(function(s) { return s.completato; }).length;
+              return (
+                <div key={p.id} className="card" style={{ padding: 12, margin: 0 }}>
+                  <div style={{ fontFamily: "Syne, sans-serif", fontWeight: 700, fontSize: 13 }}>{p.emoji} {p.nome}</div>
+                  <div style={{ fontSize: 11, color: "var(--testo-light)", marginBottom: 6 }}>{p.ente} · {stP.length}/4 studenti</div>
+                  <div className="progress-bar"><div className="progress-fill" style={{ width: ((stP.length / 4) * 100) + "%" }} /></div>
+                  {stP.length > 0 && <div style={{ fontSize: 11, color: "var(--verde)", marginTop: 4 }}>{pronti} pronti</div>}
+                </div>
+              );
+            })}
+          </div>
+
+          <div className="dashboard-grid">
+            {studenti.map(function(s) {
+              const prog = ((s.sezioniVisitate && s.sezioniVisitate.length) || 0) / WG_DATA[s.wg].sezioni.length;
+              const stato = s.completato ? "pronto" : prog > 0 ? "in-corso" : "non-iniziato";
+              return (
+                <div key={s.id} className="studente-card" style={{ cursor: "pointer", transition: "box-shadow 0.15s" }}
+                  onClick={function() { setStudenteInModifica(s); }}
+                  onMouseEnter={function(e) { e.currentTarget.style.boxShadow = "0 4px 16px rgba(0,0,0,0.1)"; }}
+                  onMouseLeave={function(e) { e.currentTarget.style.boxShadow = ""; }}>
+                  <div className="studente-card-header">
+                    <div style={{ flex: 1 }}>
+                      <div className="studente-nome">{s.emoji} {s.nome} {s.cognome}</div>
+                      <div className="studente-paese">{s.paeseName} / {s.ente}</div>
+                    </div>
+                    <span className="wg-badge" style={{ background: WG_DATA[s.wg].colore, fontSize: 10 }}>WG {s.wg}</span>
+                  </div>
+                  {s.isDelegatoCapo && <span className="tag tag-oro">Delegato Capo</span>}
+                  <div className="progress-bar"><div className="progress-fill" style={{ width: (prog * 100) + "%", background: WG_DATA[s.wg].colore }} /></div>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "var(--testo-light)" }}>
+                    <span>{(s.sezioniVisitate && s.sezioniVisitate.length) || 0}/{WG_DATA[s.wg].sezioni.length} sezioni</span>
+                    <span className={"studente-stato stato-" + stato}>{stato === "pronto" ? "✅ Pronto" : stato === "in-corso" ? "⏳ In corso" : "○ Non iniziato"}</span>
+                  </div>
+                  {s.ballotVoto && <div style={{ fontSize: 11 }}>Voto preliminare: <strong>{s.ballotVoto}</strong></div>}
+                  {s.sintesiPosizione && <div style={{ fontSize: 11, color: "var(--verde)" }}>✎ sintesi pubblicata</div>}
+                  <div style={{ fontSize: 10, color: "var(--testo-light)", textAlign: "right", marginTop: 2 }}>✏️ clicca per modificare</div>
+                </div>
+              );
+            })}
+            {studenti.length === 0 && (
+              <div style={{ gridColumn: "1/-1", color: "var(--testo-light)", fontSize: 14, padding: 20 }}>
+                Nessuno studente ancora registrato. Chiedi alla classe di accedere all'app con "Sono uno Studente" e di registrarsi selezionando lo slot (paese × WG) assegnato.
+              </div>
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+// ── Modale di modifica studente ────────────────────────────────────────────
+function ModaleModificaStudente({ studente, onSalva, onElimina, onChiudi }) {
+  const [nome, setNome] = useState(studente.nome);
+  const [cognome, setCognome] = useState(studente.cognome);
+  const [paese, setPaese] = useState(studente.paese);
+  const [wg, setWg] = useState(String(studente.wg));
+  const [step, setStep] = useState("form");
+  const [errore, setErrore] = useState("");
+
+  const handleSalva = async function() {
+    if (!nome.trim() || !cognome.trim() || !paese || !wg) { setErrore("Compila tutti i campi."); return; }
+    const paeseObj = PAESI.filter(function(p) { return p.id === paese; })[0];
+    const agg = {
+      id: studente.id,
+      nome: nome.trim(), cognome: cognome.trim(),
+      paese: paese, paeseName: paeseObj.nome, ente: paeseObj.ente, emoji: paeseObj.emoji,
+      wg: parseInt(wg), isDelegatoCapo: parseInt(wg) === 4,
+    };
+    onSalva(agg);
+  };
+
+  if (step === "conferma-elimina") {
+    return (
+      <ModaleConferma
+        titolo="Eliminare lo studente?"
+        messaggio={"Stai per eliminare definitivamente " + studente.nome + " " + studente.cognome + ". L'operazione non è reversibile."}
+        onConferma={onElimina}
+        onAnnulla={function() { setStep("form"); }}
+        pericoloso={true}
+      />
+    );
+  }
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
+      <div style={{ background: "white", borderRadius: 8, padding: 28, maxWidth: 460, width: "100%", boxShadow: "0 8px 40px rgba(0,0,0,0.2)", borderTop: "4px solid var(--blu)" }}>
+        <div style={{ fontFamily: "Syne, sans-serif", fontWeight: 800, fontSize: 17, color: "var(--blu)", marginBottom: 16 }}>Modifica studente</div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+          <div className="form-group">
+            <label className="form-label">Nome</label>
+            <input className="form-input" value={nome} onChange={function(e) { setNome(e.target.value); }} />
+          </div>
+          <div className="form-group">
+            <label className="form-label">Cognome</label>
+            <input className="form-input" value={cognome} onChange={function(e) { setCognome(e.target.value); }} />
+          </div>
+        </div>
+        <div className="form-group">
+          <label className="form-label">Paese</label>
+          <select className="form-input form-select" value={paese} onChange={function(e) { setPaese(e.target.value); }}>
+            {PAESI.map(function(p) { return <option key={p.id} value={p.id}>{p.emoji} {p.nome} ({p.ente})</option>; })}
+          </select>
+        </div>
+        <div className="form-group">
+          <label className="form-label">WG</label>
+          <select className="form-input form-select" value={wg} onChange={function(e) { setWg(e.target.value); }}>
+            <option value="1">WG 1 — Remote ID</option>
+            <option value="2">WG 2 — Limiti operativi</option>
+            <option value="3">WG 3 — Certificazione</option>
+            <option value="4">WG 4 — Campo di applicazione + Delegato Capo</option>
+          </select>
+        </div>
+        {errore && <div className="form-error" style={{ marginBottom: 8 }}>{errore}</div>}
+        <div style={{ display: "flex", gap: 8, justifyContent: "space-between" }}>
+          <button className="btn btn-danger btn-sm" onClick={function() { setStep("conferma-elimina"); }}>🗑 Elimina</button>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button className="btn btn-ghost" onClick={onChiudi}>Annulla</button>
+            <button className="btn btn-primary" onClick={handleSalva}>Salva</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ModaleConferma({ titolo, messaggio, onConferma, onAnnulla, pericoloso, children }) {
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
+      <div style={{ background: "white", borderRadius: 8, padding: 28, maxWidth: 440, width: "100%", boxShadow: "0 8px 40px rgba(0,0,0,0.2)", borderTop: "4px solid " + (pericoloso ? "var(--rosso)" : "var(--blu)") }}>
+        <div style={{ fontFamily: "Syne, sans-serif", fontWeight: 800, fontSize: 17, color: pericoloso ? "var(--rosso)" : "var(--blu)", marginBottom: 10 }}>{titolo}</div>
+        <div style={{ fontSize: 14, lineHeight: 1.7, color: "var(--testo)", marginBottom: 16 }}>{messaggio}</div>
+        {children}
+        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 16 }}>
+          <button className="btn btn-ghost" onClick={onAnnulla}>Annulla</button>
+          <button className={"btn " + (pericoloso ? "btn-danger" : "btn-primary")} onClick={onConferma}>Conferma</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+// ═══════════════════════════════════════════════════════════════════════════
+// DOCENTE / PANNELLO CHAIR — timer + registro interventi + iniezioni
+// ═══════════════════════════════════════════════════════════════════════════
+function DocentePannelloChair({ studenti, votiBackend, ricaricaVoti, ricaricaStudenti }) {
+  const [faseAttiva, setFaseAttiva] = useState("C1");
+  const [secRimanenti, setSecRimanenti] = useState(FASI_PLENARIA[0].durataMin * 60);
+  const [running, setRunning] = useState(false);
+  const [interventi, setInterventi] = useState([]);
+  const [loadingInt, setLoadingInt] = useState(true);
+  const intervalRef = useRef(null);
+
+  // Carica interventi dal backend
+  const caricaInterventi = async function() {
+    setLoadingInt(true);
+    const res = await apiCall("get_interventi", {});
+    if (res.ok) setInterventi(res.interventi || []);
+    setLoadingInt(false);
+  };
+
+  useEffect(function() {
+    caricaInterventi();
+    const t = setInterval(caricaInterventi, 15000);
+    return function() { clearInterval(t); };
+  }, []);
+
+  // Timer
+  useEffect(function() {
+    if (running) {
+      intervalRef.current = setInterval(function() {
+        setSecRimanenti(function(prev) {
+          if (prev <= 0) { setRunning(false); return 0; }
+          return prev - 1;
+        });
+      }, 1000);
+    } else {
+      if (intervalRef.current) clearInterval(intervalRef.current);
+    }
+    return function() { if (intervalRef.current) clearInterval(intervalRef.current); };
+  }, [running]);
+
+  const selezionaFase = function(id) {
+    const f = FASI_PLENARIA.filter(function(x) { return x.id === id; })[0];
+    setFaseAttiva(id);
+    setSecRimanenti(f.durataMin * 60);
+    setRunning(false);
+  };
+
+  const faseObj = FASI_PLENARIA.filter(function(f) { return f.id === faseAttiva; })[0];
+  const mm = String(Math.floor(secRimanenti / 60)).padStart(2, "0");
+  const ss = String(secRimanenti % 60).padStart(2, "0");
+  const classeTimer = secRimanenti <= 60 ? "danger" : secRimanenti <= 180 ? "warning" : "";
+
+  const registraInt = async function(paese) {
+    const capo = studenti.filter(function(s) { return s.paese === paese && parseInt(s.wg) === 4; })[0];
+    await apiCall("registra_intervento", {
+      paese: paese,
+      studenteId: capo ? capo.id : "",
+      nomeStudente: capo ? (capo.nome + " " + capo.cognome) : "",
+      fase: faseAttiva,
+      note: "",
+    });
+    caricaInterventi();
+  };
+
+  // Conteggio interventi per paese
+  const conteggio = {};
+  PAESI.forEach(function(p) { conteggio[p.id] = 0; });
+  interventi.forEach(function(i) { if (i.paese) conteggio[i.paese] = (conteggio[i.paese] || 0) + 1; });
+
+  // Voti preliminari dal backend (campo votoPreliminare)
+  const votoPrelim = function(paese) {
+    const r = votiBackend.filter(function(v) { return v.paese === paese; })[0];
+    return r ? (r.votoPreliminare || "") : "";
+  };
+
+  return (
+    <div className="chair-layout">
+      {/* COLONNA SINISTRA — timer e controllo fasi */}
+      <div>
+        <div className="chair-timer">
+          <div>
+            <div className="chair-timer-label">Fase attiva</div>
+            <div className="chair-timer-fase">{faseObj.id} · {faseObj.nome}</div>
+            <div className="chair-timer-desc">{faseObj.descrizione}</div>
+          </div>
+
+          <div className={"chair-timer-display " + classeTimer}>{mm}:{ss}</div>
+
+          <div className="chair-timer-btns">
+            {!running
+              ? <button className="btn btn-primary btn-sm" onClick={function() { setRunning(true); }}>▶ Start</button>
+              : <button className="btn btn-ghost btn-sm" style={{ color: "white", borderColor: "rgba(255,255,255,0.3)" }} onClick={function() { setRunning(false); }}>⏸ Pausa</button>
+            }
+            <button className="btn btn-ghost btn-sm" style={{ color: "white", borderColor: "rgba(255,255,255,0.3)" }} onClick={function() { setRunning(false); setSecRimanenti(faseObj.durataMin * 60); }}>↻ Reset</button>
+          </div>
+
+          <div>
+            <div className="chair-timer-label" style={{ marginBottom: 6 }}>Cambia fase</div>
+            <div className="chair-fase-picker">
+              {FASI_PLENARIA.map(function(f) {
+                return (
+                  <button key={f.id} className={"chair-fase-btn " + (f.id === faseAttiva ? "active" : "")}
+                    onClick={function() { selezionaFase(f.id); }}>{f.id} {f.nome}</button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+
+        <div className="card" style={{ marginTop: 12 }}>
+          <div className="card-title" style={{ fontSize: 13 }}>🎯 Iniezioni del Chair</div>
+          <div style={{ fontSize: 11, color: "var(--testo-light)", marginBottom: 10, lineHeight: 1.5 }}>
+            Se un conflitto non emerge spontaneamente, usa la domanda dedicata al paese chiamato:
+          </div>
+          {Object.entries(WG_DATA).map(function(entry) {
+            const num = entry[0], wg = entry[1];
+            const confl = wg.sezioni.filter(function(s) { return s.tipo === "conflitto"; })[0];
+            if (!confl) return null;
+            return (
+              <div key={num} className="chair-iniezione" style={{ marginBottom: 8, background: "#f0f4fa", color: "var(--testo)", borderLeftColor: wg.colore }}>
+                <div className="chair-iniezione-wg" style={{ color: wg.colore }}>WG {num} · {wg.conflitto}</div>
+                «{confl.domandaIniezione}»
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* COLONNA DESTRA — registro interventi */}
+      <div>
+        <div className="card">
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+            <div className="card-title" style={{ marginBottom: 0 }}>📝 Registro interventi</div>
+            <button className="btn btn-ghost btn-sm" onClick={caricaInterventi}>🔄</button>
+          </div>
+          <div className="card-sub">Clicca sul paese per registrare un intervento durante la fase attiva ({faseObj.id} — {faseObj.nome}). Il conteggio è aggiornato in tempo reale.</div>
+
+          <table className="interventi-table">
+            <thead>
+              <tr style={{ background: "#f5f2eb" }}>
+                <th style={{ textAlign: "left", padding: "8px", fontSize: 11, fontFamily: "Syne, sans-serif", letterSpacing: "0.06em" }}>PAESE</th>
+                <th style={{ textAlign: "center", padding: "8px", fontSize: 11, fontFamily: "Syne, sans-serif", letterSpacing: "0.06em" }}>INTERVENTI</th>
+                <th style={{ textAlign: "center", padding: "8px", fontSize: 11, fontFamily: "Syne, sans-serif", letterSpacing: "0.06em" }}>V. PRELIM</th>
+                <th style={{ textAlign: "right", padding: "8px", fontSize: 11, fontFamily: "Syne, sans-serif", letterSpacing: "0.06em" }}>AZIONE</th>
+              </tr>
+            </thead>
+            <tbody>
+              {PAESI.map(function(p) {
+                const prelim = votoPrelim(p.id);
+                return (
+                  <tr key={p.id}>
+                    <td style={{ fontFamily: "Syne, sans-serif", fontWeight: 600 }}>{p.emoji} {p.nome} <span style={{ color: "var(--testo-light)", fontWeight: 400, fontSize: 11 }}>({p.ente})</span></td>
+                    <td style={{ textAlign: "center" }}><span className="interv-count">{conteggio[p.id]}</span></td>
+                    <td style={{ textAlign: "center" }}>{prelim ? <span className={"ballot-sigla " + prelim} style={{ fontSize: 13 }}>{prelim}</span> : <span style={{ color: "var(--testo-light)" }}>—</span>}</td>
+                    <td style={{ textAlign: "right" }}><button className="interv-btn" onClick={function() { registraInt(p.id); }}>+ Intervento</button></td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+
+          <div style={{ marginTop: 12, fontSize: 11, color: "var(--testo-light)" }}>
+            Totale interventi registrati: <strong>{interventi.length}</strong>
+            {interventi.length > 0 && (
+              <span> · ultimo: {new Date(interventi[interventi.length - 1].timestamp).toLocaleTimeString("it-IT")}</span>
+            )}
+          </div>
+        </div>
+
+        <div className="card">
+          <div className="card-title" style={{ fontSize: 13 }}>Storico ultimi 10 interventi</div>
+          {loadingInt ? <div className="loading">Carico...</div> : (
+            interventi.length === 0 ? <div style={{ fontSize: 12, color: "var(--testo-light)" }}>Nessun intervento ancora registrato.</div> :
+            interventi.slice(-10).reverse().map(function(i, idx) {
+              const pa = PAESI.filter(function(p) { return p.id === i.paese; })[0];
+              return (
+                <div key={idx} style={{ display: "flex", gap: 10, alignItems: "center", padding: "6px 0", borderBottom: idx < 9 ? "1px solid var(--bordo)" : "none", fontSize: 12 }}>
+                  <span style={{ color: "var(--testo-light)", fontFamily: "Syne, sans-serif", fontWeight: 600, fontSize: 10, minWidth: 40 }}>{i.fase}</span>
+                  <span style={{ flex: 1, fontFamily: "Syne, sans-serif", fontWeight: 600 }}>{pa ? pa.emoji + " " + pa.nome : i.paese}</span>
+                  <span style={{ color: "var(--testo-light)", fontSize: 11 }}>{new Date(i.timestamp).toLocaleTimeString("it-IT")}</span>
+                </div>
+              );
+            })
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// DOCENTE / SCRUTINIO — voti finali
+// ═══════════════════════════════════════════════════════════════════════════
+function DocentePlenaria({ votiBackend, ricaricaVoti }) {
+  const [processing, setProcessing] = useState(false);
+
+  const getVoto = function(paese, campo) {
+    const r = votiBackend.filter(function(v) { return v.paese === paese; })[0];
+    return r ? (r[campo] || "") : "";
+  };
+
+  const setVotoFinale = async function(paese, voto) {
+    setProcessing(true);
+    const attuale = getVoto(paese, "votoFinale");
+    // Se clicco sullo stesso voto, rimuovo
+    await apiCall("set_voto_finale", { paese: paese, voto: attuale === voto ? "" : voto });
+    await ricaricaVoti();
+    setProcessing(false);
+  };
+
+  return (
+    <div>
+      <div className="plenaria-header">
+        <div className="plenaria-title">🗳️ Appello nominale — Voto finale</div>
+        <div className="plenaria-sub">Registra il voto dichiarato oralmente da ogni Delegato Capo. Il voto preliminare è mostrato come riferimento: evidenzia se è cambiato.</div>
+      </div>
+
+      <div className="card">
+        <div className="card-title">Registrazione voti finali</div>
+        <div className="card-sub">Clicca sul pulsante corrispondente al voto dichiarato in aula. Cliccando due volte sullo stesso voto lo rimuovi.</div>
+
+        {PAESI.map(function(p) {
+          const prelim = getVoto(p.id, "votoPreliminare");
+          const finale = getVoto(p.id, "votoFinale");
+          const cambiato = prelim && finale && prelim !== finale;
+          return (
+            <div key={p.id} className="voto-row">
+              <div style={{ flex: 1 }}>
+                <div className="voto-paese">{p.emoji} {p.nome} <span className="voto-ente">{p.ente}</span></div>
+                <div style={{ fontSize: 11, marginTop: 4, display: "flex", gap: 10, alignItems: "center" }}>
+                  {prelim && <span><span className="voto-prelim-label">preliminare</span> <strong style={{ fontSize: 12 }}>{prelim}</strong></span>}
+                  {cambiato && <span className="voto-cambiato">⚠ cambiato in plenaria</span>}
+                </div>
+              </div>
+              <div className="voto-btn-group">
+                {["A","AC","D","AB"].map(function(v) {
+                  return (
+                    <button key={v}
+                      className={"voto-btn " + (finale === v ? "selezionato " + v : "")}
+                      onClick={function() { setVotoFinale(p.id, v); }}
+                      disabled={processing}>{v}</button>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="card">
+        <div className="card-title">Legenda delle opzioni</div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 12, fontSize: 13 }}>
+          <div><strong>A</strong> — Approve (favorevole, senza commenti)</div>
+          <div><strong>AC</strong> — Approve with Comments (favorevole con commenti)</div>
+          <div><strong>D</strong> — Disapprove (contrario, con motivazione)</div>
+          <div><strong>AB</strong> — Abstain (astenuto, non conta nelle soglie)</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// DOCENTE / RISULTATO — calcolo ISO + export verbale + CSV valutazione
+// ═══════════════════════════════════════════════════════════════════════════
+function DocenteRisultato({ studenti, votiBackend }) {
+  const [interventi, setInterventi] = useState([]);
+  const [debriefing, setDebriefing] = useState([]);
+
+  useEffect(function() {
+    async function fetchAll() {
+      const [ri, rd] = await Promise.all([
+        apiCall("get_interventi", {}),
+        apiCall("get_debriefing", {}),
+      ]);
+      if (ri.ok) setInterventi(ri.interventi || []);
+      if (rd.ok) setDebriefing(rd.debriefing || []);
+    }
+    fetchAll();
+  }, [votiBackend]);
+
+  const votiMap = {};
+  votiBackend.forEach(function(v) { if (v.votoFinale) votiMap[v.paese] = v.votoFinale; });
+  const r = calcVoti(votiMap);
+
+  const esportaVerbale = function() {
+    let txt = "VERBALE SESSIONE PLENARIA SIMULATA — ISO/TC 20/SC 16\n";
+    txt += "=".repeat(62) + "\n\n";
+    txt += "Data: " + new Date().toLocaleDateString("it-IT") + "\n";
+    txt += "Ora:  " + new Date().toLocaleTimeString("it-IT") + "\n\n";
+    txt += "NWIP in votazione:\n";
+    txt += "  Aerospace — UAS — Minimum requirements for remote identification,\n";
+    txt += "  operational limits, operator certification and scope of application\n";
+    txt += "  in non-segregated civil airspace.\n\n";
+    txt += "ESITI VOTAZIONE\n" + "-".repeat(62) + "\n";
+    PAESI.forEach(function(p) {
+      const vp = votiBackend.filter(function(x) { return x.paese === p.id; })[0];
+      const pre = vp ? (vp.votoPreliminare || "—") : "—";
+      const fin = vp ? (vp.votoFinale || "—") : "—";
+      const ind = pre !== fin && pre !== "—" && fin !== "—" ? "  [VOTO CAMBIATO]" : "";
+      txt += p.nome.padEnd(16) + " (" + p.ente.padEnd(5) + ") preliminare: " + pre.padEnd(3) + "  finale: " + fin.padEnd(3) + ind + "\n";
+    });
+    txt += "\n";
+    txt += "RIEPILOGO NUMERICO\n" + "-".repeat(62) + "\n";
+    txt += "A  (Approve):               " + r.A + "\n";
+    txt += "AC (Approve w/ Comments):   " + r.AC + "\n";
+    txt += "D  (Disapprove):            " + r.D + "\n";
+    txt += "AB (Abstain):               " + r.AB + "\n";
+    txt += "Voti espressi (A+AC+D):     " + r.espressi + "\n";
+    txt += "Voti totali  (con AB):      " + r.totali + "\n";
+    txt += "Favorevoli (A+AC)/espr:     " + (r.favorevoli * 100).toFixed(1) + "%\n";
+    txt += "Contrari      D/espressi:   " + (r.contrari * 100).toFixed(1) + "%\n\n";
+    txt += "SOGLIE\n" + "-".repeat(62) + "\n";
+    txt += "Quorum (≥5 paesi votanti):                   " + (r.quorum ? "✓ SÌ" : "✗ NO") + "\n";
+    txt += "Favorevoli ≥ 2/3 dei voti espressi:          " + (r.sogFav ? "✓ SÌ" : "✗ NO") + "\n";
+    txt += "Contrari ≤ 1/4 dei voti espressi:            " + (r.sogContr ? "✓ SÌ" : "✗ NO") + "\n\n";
+    txt += "ESITO: " + (r.approvata ? "NWIP APPROVATA — avvio procedura WG" : "NWIP RESPINTA") + "\n\n";
+    txt += "INTERVENTI IN PLENARIA\n" + "-".repeat(62) + "\n";
+    if (interventi.length === 0) txt += "(nessun intervento registrato)\n";
+    else {
+      const contaInt = {};
+      interventi.forEach(function(i) { contaInt[i.paese] = (contaInt[i.paese] || 0) + 1; });
+      PAESI.forEach(function(p) { txt += p.nome.padEnd(16) + " " + (contaInt[p.id] || 0) + " interventi\n"; });
+    }
+    txt += "\nVerbale generato da simulazione ISO/TC 20/SC 16 — ITTL classe 3ª.\n";
+
+    const blob = new Blob([txt], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "verbale_plenaria_" + new Date().toISOString().slice(0,10) + ".txt";
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const esportaCsvValutazione = function() {
+    // CSV arricchito con tutti i dati utili per la valutazione individuale
+    const intervByStu = {};
+    interventi.forEach(function(i) {
+      if (!intervByStu[i.studenteId]) intervByStu[i.studenteId] = 0;
+      intervByStu[i.studenteId]++;
+    });
+    const dbrfByStu = {};
+    debriefing.forEach(function(d) { dbrfByStu[d.studenteId] = d; });
+
+    const header = [
+      "id","cognome","nome","paese","ente","emoji",
+      "wg","delegato_capo",
+      "sezioni_visitate","n_sezioni","completato",
+      "voto_preliminare","voto_finale","voto_cambiato",
+      "sintesi_posizione","motivazione_ballot",
+      "interventi_plenaria","risposta_debrief_cambio","risposta_debrief_q1","risposta_debrief_q2",
+      "registrato","ultimo_accesso",
+    ];
+
+    const righe = studenti.map(function(s) {
+      const votoRiga = votiBackend.filter(function(v) { return v.paese === s.paese; })[0];
+      const vPrelim = votoRiga ? (votoRiga.votoPreliminare || "") : "";
+      const vFinale = votoRiga ? (votoRiga.votoFinale || "") : "";
+      const cambio = s.isDelegatoCapo && vPrelim && vFinale && vPrelim !== vFinale ? "SI" : "NO";
+      const sv = s.sezioniVisitate || [];
+      const dbrf = dbrfByStu[s.id] || {};
+      return [
+        s.id, s.cognome, s.nome, s.paeseName, s.ente, s.emoji,
+        s.wg, s.isDelegatoCapo ? "SI" : "NO",
+        (sv || []).join("+"), (sv || []).length, s.completato ? "SI" : "NO",
+        vPrelim, vFinale, cambio,
+        (s.sintesiPosizione || "").replace(/[\r\n]+/g, " ").replace(/"/g, '""'),
+        (s.ballotMotivazione || "").replace(/[\r\n]+/g, " ").replace(/"/g, '""'),
+        s.isDelegatoCapo ? (intervByStu[s.id] || 0) : "",
+        dbrf.cambioPosizione || "",
+        (dbrf.rispostaDomanda1 || "").replace(/[\r\n]+/g, " ").replace(/"/g, '""'),
+        (dbrf.rispostaDomanda2 || "").replace(/[\r\n]+/g, " ").replace(/"/g, '""'),
+        s.registrato || "", s.ultimoAccesso || "",
+      ];
+    });
+
+    const csv = header.join(";") + "\n" + righe.map(function(r) {
+      return r.map(function(c) {
+        const s = String(c);
+        if (s.indexOf(";") >= 0 || s.indexOf('"') >= 0 || s.indexOf("\n") >= 0) return '"' + s + '"';
+        return s;
+      }).join(";");
+    }).join("\n");
+
+    // Aggiungo BOM per Excel Italiano
+    const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "valutazione_plenaria_" + new Date().toISOString().slice(0,10) + ".csv";
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  return (
+    <div>
+      {!r.quorum && (
+        <div style={{ background: "#fff8e7", border: "1px solid #d9b96a", borderLeft: "4px solid #c9a14a", padding: 16, borderRadius: 4, marginBottom: 16, fontSize: 14 }}>
+          ⚠ <strong>Quorum non raggiunto.</strong> Mancano voti: sono richiesti almeno 5 paesi votanti (A + AC + D + AB) perché la votazione sia valida.
+        </div>
+      )}
+
+      <div className={"risultato-box " + (r.approvata ? "risultato-approvata" : "risultato-respinta")}>
+        <div className="risultato-titolo">{r.approvata ? "✓ NWIP APPROVATA" : "✗ NWIP RESPINTA"}</div>
+        <div className="risultato-sub">
+          {r.approvata ? "La proposta avanza allo stadio Working Draft (WD). Il TC 20/SC 16 avvia formalmente il lavoro del WG."
+                       : "La proposta non ha raggiunto le soglie richieste e viene archiviata. Eventualmente ripresentabile in versione modificata."}
+        </div>
+      </div>
+
+      <div className="card">
+        <div className="card-title">Riepilogo numerico</div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 8, marginBottom: 12 }}>
+          {[
+            { label: "A (Approve)", val: r.A, color: "var(--verde)" },
+            { label: "AC (Approve w/ C.)", val: r.AC, color: "#2a7a5a" },
+            { label: "D (Disapprove)", val: r.D, color: "var(--rosso)" },
+            { label: "AB (Abstain)", val: r.AB, color: "#777" },
+          ].map(function(c) {
+            return (
+              <div key={c.label} style={{ textAlign: "center", padding: 10, border: "1px solid var(--bordo)", borderRadius: 4 }}>
+                <div style={{ fontFamily: "Syne, sans-serif", fontWeight: 800, fontSize: 22, color: c.color }}>{c.val}</div>
+                <div style={{ fontSize: 10, color: "var(--testo-light)", fontFamily: "Syne, sans-serif", fontWeight: 600 }}>{c.label}</div>
+              </div>
+            );
+          })}
+        </div>
+        <div className="soglia-row"><span>Favorevoli (A + AC) ≥ 2/3 dei voti espressi</span><span className={r.sogFav ? "soglia-ok" : "soglia-no"}>{(r.favorevoli * 100).toFixed(1)}% {r.sogFav ? "✓" : "✗"}</span></div>
+        <div className="soglia-row"><span>Contrari (D) ≤ 1/4 dei voti espressi</span><span className={r.sogContr ? "soglia-ok" : "soglia-no"}>{(r.contrari * 100).toFixed(1)}% {r.sogContr ? "✓" : "✗"}</span></div>
+        <div className="soglia-row" style={{ borderBottom: "none" }}><span>Quorum: ≥ 5 paesi votanti (A+AC+D+AB)</span><span className={r.quorum ? "soglia-ok" : "soglia-no"}>{r.totali} {r.quorum ? "✓" : "✗"}</span></div>
+      </div>
+
+      <div className="card">
+        <div className="card-title">📥 Export</div>
+        <div className="card-sub">Esporta il verbale in formato testo o la tabella CSV per la valutazione individuale.</div>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <button className="btn btn-primary" onClick={esportaVerbale}>📄 Verbale plenaria (TXT)</button>
+          <button className="btn btn-verde" onClick={esportaCsvValutazione}>📊 CSV valutazione arricchito</button>
+        </div>
+        <div style={{ marginTop: 12, padding: 10, background: "#f5f2eb", borderRadius: 4, fontSize: 11, color: "var(--testo-light)", lineHeight: 1.55 }}>
+          <strong>CSV valutazione — campi inclusi:</strong> anagrafica, paese/WG/ruolo, sezioni WG visitate, stato di completamento, voto preliminare e finale con flag di cambio (solo Delegati Capo), sintesi di posizione pubblicata, motivazione del ballot individuale, numero di interventi in plenaria, risposte al debriefing, timestamp di registrazione e ultimo accesso. Separatore «;» e BOM UTF-8 per compatibilità con Excel italiano.
+        </div>
+      </div>
+    </div>
+  );
+}
+// ═══════════════════════════════════════════════════════════════════════════
+// DOCENTE / SINTESI DI POSIZIONE — vista aggregata per paese
+// ═══════════════════════════════════════════════════════════════════════════
+function DocenteSintesi() {
+  const [perPaese, setPerPaese] = useState({});
+  const [loading, setLoading] = useState(true);
+  const [paeseFiltro, setPaeseFiltro] = useState("tutti");
+
+  const carica = async function() {
+    setLoading(true);
+    const res = await apiCall("sintesi_complete", {});
+    if (res.ok) setPerPaese(res.perPaese || {});
+    setLoading(false);
+  };
+
+  useEffect(function() {
+    carica();
+    const t = setInterval(carica, 20000); // refresh ogni 20 s
+    return function() { clearInterval(t); };
+  }, []);
+
+  // Statistiche rapide: quante sintesi pubblicate sul totale degli iscritti
+  const tutte = [].concat.apply([], Object.values(perPaese));
+  const iscritti = tutte.length;
+  const conSintesi = tutte.filter(function(s) { return (s.sintesiPosizione || "").trim().length > 0; }).length;
+
+  const paesiDaMostrare = paeseFiltro === "tutti" ? PAESI : PAESI.filter(function(p) { return p.id === paeseFiltro; });
+
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, flexWrap: "wrap", gap: 12 }}>
+        <div>
+          <div style={{ fontFamily: "Syne, sans-serif", fontWeight: 700, fontSize: 16, color: "var(--blu)" }}>✍️ Sintesi di posizione</div>
+          <div style={{ fontSize: 13, color: "var(--testo-light)" }}>
+            {conSintesi} sintesi pubblicate su {iscritti} studenti iscritti. Aggiornamento automatico ogni 20 secondi.
+          </div>
+        </div>
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <select className="form-input form-select" style={{ padding: "6px 10px", fontSize: 13 }}
+            value={paeseFiltro} onChange={function(e) { setPaeseFiltro(e.target.value); }}>
+            <option value="tutti">Tutti i paesi</option>
+            {PAESI.map(function(p) { return <option key={p.id} value={p.id}>{p.emoji} {p.nome}</option>; })}
+          </select>
+          <button className="btn btn-ghost btn-sm" onClick={carica}>🔄 Aggiorna</button>
+        </div>
+      </div>
+
+      {loading && iscritti === 0 ? <div className="loading">Carico sintesi...</div> : (
+        <>
+          {paesiDaMostrare.map(function(p) {
+            const membri = perPaese[p.id] || [];
+            if (membri.length === 0 && paeseFiltro === "tutti") return null;
+            // Tensione intra-delegazione: voti preliminari diversi
+            const voti = membri.filter(function(m) { return m.ballotVoto; }).map(function(m) { return m.ballotVoto; });
+            const uniciVoti = Array.from(new Set(voti));
+            const haTensione = uniciVoti.length > 1;
+            return (
+              <div key={p.id} className="card" style={{ borderTop: "3px solid " + (haTensione ? "var(--arancio)" : "var(--blu)") }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                  <div className="card-title" style={{ marginBottom: 0 }}>
+                    {p.emoji} {p.nome} <span style={{ color: "var(--testo-light)", fontWeight: 400, fontSize: 13 }}>({p.ente})</span>
+                  </div>
+                  <div style={{ display: "flex", gap: 6 }}>
+                    {haTensione && <span className="tag tag-ambra">⚠ tensione: {uniciVoti.join(", ")}</span>}
+                    <span className="tag" style={{ background: "#eef2f8", color: "var(--blu)" }}>
+                      {membri.filter(function(m) { return (m.sintesiPosizione || "").trim().length > 0; }).length}/{membri.length} sintesi
+                    </span>
+                  </div>
+                </div>
+
+                {membri.length === 0 ? (
+                  <div style={{ fontSize: 13, color: "var(--testo-light)", fontStyle: "italic", padding: "10px 0" }}>
+                    Nessuno studente registrato per questa delegazione.
+                  </div>
+                ) : (
+                  [1,2,3,4].map(function(wgNum) {
+                    const membro = membri.filter(function(m) { return m.wg === wgNum; })[0];
+                    const wgInfo = WG_DATA[wgNum];
+                    if (!membro) {
+                      return (
+                        <div key={wgNum} style={{ padding: "10px 12px", background: "#fafafa", border: "1px dashed var(--bordo)", borderRadius: 4, marginBottom: 8, fontSize: 12, color: "var(--testo-light)" }}>
+                          <span style={{ fontFamily: "Syne, sans-serif", fontWeight: 600 }}>WG {wgNum}</span> — {wgInfo.titolo} · posto non assegnato
+                        </div>
+                      );
+                    }
+                    const haSintesi = (membro.sintesiPosizione || "").trim().length > 0;
+                    return (
+                      <div key={wgNum} style={{
+                        padding: "12px 14px",
+                        background: membro.isDelegatoCapo ? "linear-gradient(to right, #fffbef 0%, white 40%)" : "var(--bg)",
+                        borderLeft: "3px solid " + wgInfo.colore,
+                        borderRadius: "0 4px 4px 0",
+                        marginBottom: 8
+                      }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6, flexWrap: "wrap", gap: 8 }}>
+                          <div style={{ fontFamily: "Syne, sans-serif", fontWeight: 700, fontSize: 13, color: wgInfo.colore }}>
+                            WG {wgNum} · {wgInfo.titolo}
+                            {membro.isDelegatoCapo && <span style={{ color: "#6e4e0e", marginLeft: 6 }}>★ Delegato Capo</span>}
+                          </div>
+                          <div style={{ fontSize: 12, color: "var(--testo-light)" }}>
+                            {membro.nome} {membro.cognome}
+                            {membro.ballotVoto && <span style={{ marginLeft: 8 }}>· voto prelim. <span className={"ballot-sigla " + membro.ballotVoto} style={{ fontSize: 11 }}>{membro.ballotVoto}</span></span>}
+                          </div>
+                        </div>
+                        <div style={{ fontSize: 13, lineHeight: 1.6, color: "var(--testo)" }}>
+                          {haSintesi ? membro.sintesiPosizione : (
+                            <span style={{ color: "var(--testo-light)", fontStyle: "italic" }}>— sintesi non ancora pubblicata —</span>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            );
+          })}
+
+          {iscritti === 0 && (
+            <div className="card" style={{ textAlign: "center", color: "var(--testo-light)" }}>
+              Nessuno studente ancora registrato.
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// DOCENTE / DIAGNOSTICA COERENZA DELEGAZIONI (Blocco 8)
+// ═══════════════════════════════════════════════════════════════════════════
+function DocenteDiagnostica() {
+  const [diag, setDiag] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  const carica = async function() {
+    setLoading(true);
+    const res = await apiCall("diagnostica_coerenza", {});
+    if (res.ok) setDiag(res.diagnostica || []);
+    setLoading(false);
+  };
+
+  useEffect(function() {
+    carica();
+    const t = setInterval(carica, 20000);
+    return function() { clearInterval(t); };
+  }, []);
+
+  const tensioni = diag.filter(function(d) { return d.tensione; });
+  const coerenti = diag.filter(function(d) { return !d.tensione && d.votoDelegatoCapo; });
+  const incomplete = diag.filter(function(d) { return !d.votoDelegatoCapo && d.votiEsperti && d.votiEsperti.length > 0; });
+
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+        <div>
+          <div style={{ fontFamily: "Syne, sans-serif", fontWeight: 700, fontSize: 16, color: "var(--blu)" }}>🔍 Diagnostica coerenza delegazioni</div>
+          <div style={{ fontSize: 13, color: "var(--testo-light)" }}>
+            Confronta in tempo reale i voti preliminari all'interno di ogni delegazione. Le tensioni sono divergenze tra i voti dei 4 membri.
+          </div>
+        </div>
+        <button className="btn btn-ghost btn-sm" onClick={carica}>🔄 Aggiorna</button>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12, marginBottom: 20 }}>
+        <div className="card" style={{ margin: 0, borderTop: "3px solid var(--arancio)" }}>
+          <div style={{ fontFamily: "Syne, sans-serif", fontWeight: 800, fontSize: 32, color: "var(--arancio)" }}>{tensioni.length}</div>
+          <div style={{ fontSize: 12, color: "var(--testo-light)", fontFamily: "Syne, sans-serif", fontWeight: 600, letterSpacing: "0.06em" }}>DELEGAZIONI IN TENSIONE</div>
+        </div>
+        <div className="card" style={{ margin: 0, borderTop: "3px solid var(--verde)" }}>
+          <div style={{ fontFamily: "Syne, sans-serif", fontWeight: 800, fontSize: 32, color: "var(--verde)" }}>{coerenti.length}</div>
+          <div style={{ fontSize: 12, color: "var(--testo-light)", fontFamily: "Syne, sans-serif", fontWeight: 600, letterSpacing: "0.06em" }}>DELEGAZIONI COERENTI</div>
+        </div>
+        <div className="card" style={{ margin: 0, borderTop: "3px solid var(--testo-light)" }}>
+          <div style={{ fontFamily: "Syne, sans-serif", fontWeight: 800, fontSize: 32, color: "var(--testo-light)" }}>{incomplete.length}</div>
+          <div style={{ fontSize: 12, color: "var(--testo-light)", fontFamily: "Syne, sans-serif", fontWeight: 600, letterSpacing: "0.06em" }}>CAPI SENZA VOTO</div>
+        </div>
+      </div>
+
+      {loading ? <div className="loading">Caricamento diagnostica...</div> : (
+        <>
+          {tensioni.length > 0 && (
+            <div className="card">
+              <div className="card-title" style={{ color: "var(--arancio)" }}>⚠ Tensioni rilevate ({tensioni.length})</div>
+              <div className="card-sub">Il voto del Delegato Capo non coincide con i voti preliminari dei compagni di delegazione. Vale la pena chiedere al Capo come ha risolto la divergenza.</div>
+              {tensioni.map(function(d) {
+                const p = PAESI.filter(function(x) { return x.id === d.paese; })[0];
+                return (
+                  <div key={d.paese} className="diag-card tensione">
+                    <div className="diag-header">
+                      <div className="diag-paese">{p.emoji} {p.nome} ({p.ente})</div>
+                      <span className="tag tag-ambra">{d.numeroVotiUnici} voti diversi</span>
+                    </div>
+                    <div className="diag-voti">
+                      <span className="diag-voto-pill capo">CAPO (WG4): {d.votoDelegatoCapo || "—"}</span>
+                      {(d.votiEsperti || []).map(function(e, i) {
+                        const isDiv = d.votoDelegatoCapo && e.voto && e.voto !== d.votoDelegatoCapo;
+                        return (
+                          <span key={i} className={"diag-voto-pill " + (isDiv ? "div" : "")}>
+                            WG{e.wg}: {e.voto || "—"} ({e.nome.split(" ")[0]})
+                          </span>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {coerenti.length > 0 && (
+            <div className="card">
+              <div className="card-title" style={{ color: "var(--verde)" }}>✓ Delegazioni coerenti ({coerenti.length})</div>
+              {coerenti.map(function(d) {
+                const p = PAESI.filter(function(x) { return x.id === d.paese; })[0];
+                return (
+                  <div key={d.paese} className="diag-card coerente">
+                    <div className="diag-header">
+                      <div className="diag-paese">{p.emoji} {p.nome} ({p.ente})</div>
+                      <span className="tag tag-verde">voto unanime: {d.votoDelegatoCapo}</span>
+                    </div>
+                    <div className="diag-voti">
+                      <span className="diag-voto-pill capo">CAPO: {d.votoDelegatoCapo}</span>
+                      {(d.votiEsperti || []).map(function(e, i) {
+                        return <span key={i} className="diag-voto-pill">WG{e.wg}: {e.voto || "—"}</span>;
+                      })}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {incomplete.length > 0 && (
+            <div className="card">
+              <div className="card-title" style={{ color: "var(--testo-light)" }}>○ Delegazioni senza voto del Capo ({incomplete.length})</div>
+              <div className="card-sub">I compagni hanno espresso voti preliminari, ma il Delegato Capo non ha ancora pubblicato il suo voto.</div>
+              {incomplete.map(function(d) {
+                const p = PAESI.filter(function(x) { return x.id === d.paese; })[0];
+                return (
+                  <div key={d.paese} className="diag-card">
+                    <div className="diag-header">
+                      <div className="diag-paese">{p.emoji} {p.nome} ({p.ente})</div>
+                    </div>
+                    <div className="diag-voti">
+                      {(d.votiEsperti || []).map(function(e, i) {
+                        return <span key={i} className="diag-voto-pill">WG{e.wg}: {e.voto || "—"}</span>;
+                      })}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {diag.length === 0 && !loading && (
+            <div className="card" style={{ textAlign: "center", color: "var(--testo-light)" }}>Nessuna delegazione con voti preliminari registrati.</div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// DOCENTE / DEBRIEFING AGGREGATO (Blocco 7)
+// ═══════════════════════════════════════════════════════════════════════════
+function DocenteDebriefing() {
+  const [risposte, setRisposte] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  const carica = async function() {
+    setLoading(true);
+    const res = await apiCall("get_debriefing", {});
+    if (res.ok) setRisposte(res.debriefing || []);
+    setLoading(false);
+  };
+
+  useEffect(function() {
+    carica();
+    const t = setInterval(carica, 20000);
+    return function() { clearInterval(t); };
+  }, []);
+
+  // Statistiche cambio posizione
+  const stats = { "Sì, ho cambiato voto": 0, "No, stesso voto": 0, "No, ma stavo per farlo": 0 };
+  risposte.forEach(function(r) { if (r.cambioPosizione && stats[r.cambioPosizione] !== undefined) stats[r.cambioPosizione]++; });
+  const tot = risposte.length;
+
+  const domande = DOMANDE_DEBRIEFING.filter(function(d) { return d.tipo === "aperta"; });
+
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+        <div>
+          <div style={{ fontFamily: "Syne, sans-serif", fontWeight: 700, fontSize: 16, color: "var(--blu)" }}>💬 Debriefing post-plenaria</div>
+          <div style={{ fontSize: 13, color: "var(--testo-light)" }}>{tot} risposte ricevute</div>
+        </div>
+        <button className="btn btn-ghost btn-sm" onClick={carica}>🔄 Aggiorna</button>
+      </div>
+
+      {loading ? <div className="loading">Carico risposte...</div> : tot === 0 ? (
+        <div className="card" style={{ textAlign: "center", color: "var(--testo-light)" }}>
+          Nessuna risposta al debriefing ancora inviata. Gli studenti possono compilare il debriefing dalla loro dashboard al termine della plenaria.
+        </div>
+      ) : (
+        <>
+          <div className="card">
+            <div className="card-title">📊 Cambio di posizione tra voto preliminare e finale</div>
+            {Object.entries(stats).map(function(entry) {
+              const et = entry[0], n = entry[1];
+              const perc = tot > 0 ? (n / tot) * 100 : 0;
+              return (
+                <div key={et} style={{ marginBottom: 10 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginBottom: 4 }}>
+                    <span>{et}</span>
+                    <span style={{ fontFamily: "Syne, sans-serif", fontWeight: 700 }}>{n} ({perc.toFixed(0)}%)</span>
+                  </div>
+                  <div className="progress-bar"><div className="progress-fill" style={{ width: perc + "%", background: "var(--blu-light)" }} /></div>
+                </div>
+              );
+            })}
+          </div>
+
+          {domande.map(function(d, di) {
+            const risDomanda = risposte.map(function(r) {
+              return { id: r.studenteId, nome: r.nomeStudente, paese: r.paese, wg: r.wg, risposta: r["rispostaDomanda" + (di + 1)] };
+            }).filter(function(r) { return r.risposta && r.risposta.trim().length > 0; });
+
+            return (
+              <div key={d.id} className="card">
+                <div className="card-title">Q{di + 1}. {d.domanda}</div>
+                <div className="card-sub">{risDomanda.length} risposte</div>
+                {risDomanda.length === 0 ? (
+                  <div style={{ fontSize: 13, color: "var(--testo-light)", fontStyle: "italic" }}>Nessuna risposta per questa domanda.</div>
+                ) : (
+                  risDomanda.map(function(r, i) {
+                    const p = PAESI.filter(function(x) { return x.id === r.paese; })[0];
+                    return (
+                      <div key={i} style={{ padding: "12px 14px", background: "var(--bg)", borderLeft: "3px solid var(--blu-light)", borderRadius: "0 4px 4px 0", marginBottom: 8 }}>
+                        <div style={{ fontSize: 11, color: "var(--testo-light)", fontFamily: "Syne, sans-serif", fontWeight: 600, marginBottom: 4 }}>
+                          {p ? p.emoji + " " + p.nome : r.paese} · WG {r.wg} · {r.nome}
+                        </div>
+                        <div style={{ fontSize: 13, lineHeight: 1.55 }}>{r.risposta}</div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            );
+          })}
+        </>
+      )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// DOCENTE / ARCHIVIO PLENARIE (Blocco 9)
+// ═══════════════════════════════════════════════════════════════════════════
+function DocenteArchivio({ votiBackend }) {
+  const [archivio, setArchivio] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [classe, setClasse] = useState("");
+  const [anno, setAnno] = useState("");
+  const [note, setNote] = useState("");
+  const [confermaArchivio, setConfermaArchivio] = useState(false);
+
+  const carica = async function() {
+    setLoading(true);
+    const res = await apiCall("lista_archivio", {});
+    if (res.ok) setArchivio(res.archivio || []);
+    setLoading(false);
+  };
+
+  useEffect(function() { carica(); }, []);
+
+  const archivia = async function() {
+    const voti = {}; const movimento = {};
+    PAESI.forEach(function(p) {
+      const r = votiBackend.filter(function(v) { return v.paese === p.id; })[0];
+      voti[p.id] = r ? (r.votoFinale || "") : "";
+      movimento[p.id] = { preliminare: r ? (r.votoPreliminare || "") : "", finale: r ? (r.votoFinale || "") : "" };
+    });
+    const calc = calcVoti(voti);
+    await apiCall("archivia_plenaria", {
+      classe: classe, annoScolastico: anno, note: note,
+      voti: voti, movimentoVoti: movimento,
+      esito: calc.approvata ? "APPROVATA" : (calc.quorum ? "RESPINTA" : "NON VALIDA"),
+      favorevoli: calc.A + calc.AC,
+      contrari: calc.D,
+      astensioni: calc.AB,
+    });
+    setClasse(""); setAnno(""); setNote(""); setConfermaArchivio(false);
+    carica();
+  };
+
+  return (
+    <div>
+      {confermaArchivio && (
+        <ModaleConferma
+          titolo="Archiviare la plenaria corrente?"
+          messaggio="Verrà creato uno snapshot con i voti finali, il movimento preliminare→finale e le statistiche. Questa operazione non rimuove i dati correnti: puoi continuare a lavorare sulla stessa plenaria o resettarla dalle Impostazioni."
+          onConferma={archivia}
+          onAnnulla={function() { setConfermaArchivio(false); }}
+        />
+      )}
+
+      <div className="card">
+        <div className="card-title">📚 Archivio plenarie</div>
+        <div className="card-sub">Salva la plenaria corrente come snapshot confrontabile con plenarie di altre classi o anni scolastici.</div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+          <div className="form-group">
+            <label className="form-label">Classe</label>
+            <input className="form-input" value={classe} onChange={function(e) { setClasse(e.target.value); }} placeholder="es. 3A ITTL" />
+          </div>
+          <div className="form-group">
+            <label className="form-label">Anno scolastico</label>
+            <input className="form-input" value={anno} onChange={function(e) { setAnno(e.target.value); }} placeholder="es. 2025/26" />
+          </div>
+        </div>
+        <div className="form-group">
+          <label className="form-label">Note (opzionale)</label>
+          <textarea className="form-input form-textarea" value={note} onChange={function(e) { setNote(e.target.value); }} placeholder="Osservazioni particolari, riflessioni, elementi notevoli di questa plenaria..." style={{ minHeight: 70 }} />
+        </div>
+        <button className="btn btn-primary" onClick={function() { setConfermaArchivio(true); }} disabled={!classe.trim() || !anno.trim()}>📥 Archivia plenaria corrente</button>
+      </div>
+
+      <div className="card">
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div className="card-title" style={{ marginBottom: 0 }}>Plenarie archiviate ({archivio.length})</div>
+          <button className="btn btn-ghost btn-sm" onClick={carica}>🔄</button>
+        </div>
+        <hr className="divider" />
+
+        {loading ? <div className="loading">Caricamento...</div> : archivio.length === 0 ? (
+          <div style={{ color: "var(--testo-light)", fontSize: 13 }}>Nessuna plenaria archiviata. Archivia la prima quando hai completato lo scrutinio.</div>
+        ) : (
+          archivio.slice().reverse().map(function(a) {
+            const voti = a.voti || {};
+            return (
+              <div key={a.id} className="archivio-item">
+                <div className="archivio-header">
+                  <div>
+                    <div className="archivio-titolo">{a.classe} · {a.annoScolastico}</div>
+                    <div className="archivio-meta">{new Date(a.dataPlenaria).toLocaleString("it-IT")}</div>
+                  </div>
+                  <div style={{ textAlign: "right" }}>
+                    <span className={"tag " + (a.esito === "APPROVATA" ? "tag-verde" : a.esito === "RESPINTA" ? "tag-rosso" : "tag-ambra")}>{a.esito}</span>
+                    <div style={{ fontSize: 11, color: "var(--testo-light)", marginTop: 4 }}>Fav. {a.favorevoli} · Contr. {a.contrari} · Ast. {a.astensioni}</div>
+                  </div>
+                </div>
+                <div className="archivio-stats">
+                  {PAESI.map(function(p) {
+                    const v = voti[p.id] || "";
+                    return (
+                      <div key={p.id} className={"archivio-voto-cella " + (v || "vuoto")} title={p.nome + " (" + p.ente + ")"}>
+                        <div style={{ fontSize: 10, opacity: 0.7, fontFamily: "Syne, sans-serif", fontWeight: 700, marginBottom: 2 }}>{p.id}</div>
+                        <div>{v || "—"}</div>
+                      </div>
+                    );
+                  })}
+                </div>
+                {a.note && (
+                  <div style={{ marginTop: 10, padding: "8px 10px", background: "var(--bg)", borderRadius: 4, fontSize: 12, fontStyle: "italic", color: "var(--testo-light)" }}>
+                    « {a.note} »
+                  </div>
+                )}
+              </div>
+            );
+          })
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// DOCENTE / IMPOSTAZIONI
+// ═══════════════════════════════════════════════════════════════════════════
+function DocenteImpostazioni({ studenti, votiBackend, ricarica }) {
+  const [confermaResetPlen, setConfermaResetPlen] = useState(false);
+  const [confermaResetTotale, setConfermaResetTotale] = useState(false);
+  const [msg, setMsg] = useState("");
+
+  const votiFinali = votiBackend.filter(function(v) { return v.votoFinale; }).length;
+  const votiPrelim = votiBackend.filter(function(v) { return v.votoPreliminare; }).length;
+
+  return (
+    <div>
+      {confermaResetPlen && (
+        <ModaleConferma
+          titolo="Reset della plenaria corrente?"
+          messaggio="Saranno rimossi: voti preliminari e finali di tutti i paesi, registro interventi, risposte al debriefing. Gli studenti registrati restano invariati. L'archivio non viene toccato. L'operazione non è reversibile."
+          onConferma={async function() { await apiCall("reset_plenaria", {}); setConfermaResetPlen(false); setMsg("Plenaria resettata."); ricarica(); setTimeout(function() { setMsg(""); }, 3000); }}
+          onAnnulla={function() { setConfermaResetPlen(false); }}
+          pericoloso={true}
+        />
+      )}
+      {confermaResetTotale && (
+        <ModaleConferma
+          titolo="Reset TOTALE della simulazione?"
+          messaggio="Saranno rimossi TUTTI i dati: studenti, voti, interventi, debriefing. L'archivio delle plenarie resta intatto. Usa questa opzione solo per iniziare con una nuova classe. L'operazione non è reversibile."
+          onConferma={async function() { await apiCall("reset_totale", {}); setConfermaResetTotale(false); setMsg("Reset totale eseguito."); ricarica(); setTimeout(function() { setMsg(""); }, 3000); }}
+          onAnnulla={function() { setConfermaResetTotale(false); }}
+          pericoloso={true}
+        />
+      )}
+
+      <div className="card">
+        <div className="card-title">⚙️ Stato della simulazione</div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10 }}>
+          {[
+            { lab: "STUDENTI REGISTRATI", val: studenti.length, lim: "/28" },
+            { lab: "PREPARAZIONE PRONTA", val: studenti.filter(function(s) { return s.completato; }).length, lim: "/" + studenti.length },
+            { lab: "VOTI PRELIMINARI",    val: votiPrelim, lim: "/7" },
+            { lab: "VOTI FINALI",          val: votiFinali, lim: "/7" },
+          ].map(function(c) {
+            return (
+              <div key={c.lab} style={{ padding: 12, border: "1px solid var(--bordo)", borderRadius: 4, textAlign: "center" }}>
+                <div style={{ fontFamily: "Syne, sans-serif", fontWeight: 800, fontSize: 24, color: "var(--blu)" }}>{c.val}<span style={{ fontSize: 14, color: "var(--testo-light)", fontWeight: 400 }}>{c.lim}</span></div>
+                <div style={{ fontSize: 10, fontFamily: "Syne, sans-serif", fontWeight: 600, letterSpacing: "0.06em", color: "var(--testo-light)" }}>{c.lab}</div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="card">
+        <div className="card-title" style={{ color: "var(--rosso)" }}>🗑 Reset</div>
+        <div className="card-sub">Operazioni distruttive. Usare con cautela.</div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <button className="btn btn-danger" onClick={function() { setConfermaResetPlen(true); }}>🔄 Reset plenaria corrente (mantiene studenti)</button>
+          <button className="btn btn-danger" onClick={function() { setConfermaResetTotale(true); }}>⚠️ Reset TOTALE (cancella anche gli studenti)</button>
+        </div>
+        {msg && <div style={{ marginTop: 12, padding: 10, background: "#e8f5ee", color: "var(--verde)", borderRadius: 4, fontSize: 13 }}>{msg}</div>}
+      </div>
+
+      <div className="card">
+        <div className="card-title">📘 Configurazione backend</div>
+        <div style={{ fontSize: 13, lineHeight: 1.65, color: "var(--testo)" }}>
+          Per modificare il codice di accesso docente, modifica la costante <code style={{ background: "var(--bg)", padding: "2px 6px", borderRadius: 3 }}>DOCENTE_CODE</code> nel codice Apps Script del Foglio Google e ridistribuisci il deployment come nuova versione (<em>Deploy → Gestisci deployment → matita → Versione: Nuova versione</em>).
+          <br /><br />
+          L'array <code style={{ background: "var(--bg)", padding: "2px 6px", borderRadius: 3 }}>DOCENTE_EMAILS</code> resta disponibile come meccanismo di fallback: funziona solo se il backend riesce a leggere l'identità Google del chiamante, cosa che di norma non avviene con il deploy "Chiunque" necessario per gli studenti.
+          <br /><br />
+          Per configurare l'URL del backend o reinizializzare la struttura dati, consulta il file <code style={{ background: "var(--bg)", padding: "2px 6px", borderRadius: 3 }}>ISTRUZIONI_SETUP.md</code> fornito insieme all'applicazione.
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// MOUNT
+// ═══════════════════════════════════════════════════════════════════════════
+const rootEl = document.getElementById("root");
+rootEl.innerHTML = "";
+ReactDOM.createRoot(rootEl).render(<App />);
+</script>
+</body>
+</html>
