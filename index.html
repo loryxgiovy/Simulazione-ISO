@@ -212,6 +212,34 @@ const DOMANDE_DEBRIEFING = [
 ];
 
 // ═══════════════════════════════════════════════════════════════════════════
+// COSTANTI MODULO CHAT (v3.1)
+// ═══════════════════════════════════════════════════════════════════════════
+const CHAT_POLLING_MS    = 6000;
+const INTESA_POLLING_MS  = 8000;
+const CHAT_MAX_MSG_LEN   = 800;
+const CHAT_MAX_INTESA_LEN = 1500;
+
+const NOMI_WG = {
+  WG_1: "WG 1 — Remote ID",
+  WG_2: "WG 2 — Limiti operativi",
+  WG_3: "WG 3 — Certificazione operatori",
+  WG_4: "WG 4 — Campo di applicazione",
+};
+
+function nomePaeseEsteso(codice) {
+  const p = PAESI.find(function(x) { return x.id === codice; });
+  return p ? (p.emoji + " " + p.nome + " (" + p.ente + ")") : codice;
+}
+
+function formattaOrarioMsg(iso) {
+  if (!iso) return "";
+  try {
+    const d = new Date(iso);
+    return d.toLocaleString("it-IT", { hour: "2-digit", minute: "2-digit", day: "2-digit", month: "2-digit" });
+  } catch (e) { return iso; }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // UTILITY: CALCOLO VOTI ISO
 // ═══════════════════════════════════════════════════════════════════════════
 function calcVoti(voti) {
@@ -699,6 +727,80 @@ const css = `
   .slot-wg-pill.occupato { background: #f0f0f0; color: #aaa; text-decoration: line-through; }
   .slot-wg-pill.selected-wg { background: var(--oro); color: var(--blu); }
 
+  /* ═══ CHAT WG / DELEGAZIONE — v3.1 ═══ */
+  .chat-container { background: var(--bg-card); border: 1px solid var(--bordo); border-radius: 6px; padding: 0; margin-bottom: 16px; box-shadow: 0 1px 4px rgba(0,0,0,0.06); overflow: hidden; }
+  .chat-header { background: var(--blu); color: white; padding: 14px 18px; display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; border-bottom: 2px solid var(--oro); }
+  .chat-titolo { font-family: 'Syne', sans-serif; font-weight: 700; font-size: 14px; letter-spacing: 0.02em; }
+  .chat-sottotitolo { font-size: 11px; color: rgba(255,255,255,0.7); margin-top: 3px; font-style: italic; }
+  .chat-stato { font-size: 11px; color: rgba(255,255,255,0.7); font-family: 'Syne', sans-serif; font-weight: 600; white-space: nowrap; }
+  .chat-finestra { background: var(--bg); padding: 14px; height: 360px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; border-bottom: 1px solid var(--bordo); }
+  .chat-vuota { color: var(--testo-light); font-style: italic; text-align: center; padding: 40px 12px; font-size: 13px; }
+
+  .msg-bubble { max-width: 82%; padding: 8px 12px; border-radius: 6px; font-size: 13px; line-height: 1.45; border: 1px solid var(--bordo); }
+  .msg-mio { background: var(--blu); color: white; align-self: flex-end; border-color: var(--blu); }
+  .msg-altrui { background: var(--bg-card); align-self: flex-start; }
+  .msg-sistema { background: #fdf6e0; border: 1px solid var(--oro); align-self: center; max-width: 92%; }
+  .msg-eliminato { opacity: 0.55; font-style: italic; background: #fbe9e9; border-color: #c8a8a8; align-self: center; }
+  .msg-header { font-size: 10px; margin-bottom: 4px; display: flex; justify-content: space-between; gap: 10px; font-family: 'Syne', sans-serif; font-weight: 600; letter-spacing: 0.02em; }
+  .msg-mio .msg-header { color: rgba(255,255,255,0.8); }
+  .msg-altrui .msg-header, .msg-sistema .msg-header { color: var(--testo-light); }
+  .msg-paese, .msg-wg { font-weight: 400; opacity: 0.8; }
+  .msg-testo { white-space: pre-wrap; word-break: break-word; }
+  .msg-ora { font-weight: 400; opacity: 0.7; }
+
+  .chat-input-area { background: var(--bg-card); padding: 12px 14px; }
+  .chat-input-row { display: flex; gap: 8px; align-items: stretch; }
+  .chat-input { flex: 1; padding: 8px 10px; border: 1px solid var(--bordo); border-radius: 4px; font-family: 'Source Serif 4', serif; font-size: 13px; resize: vertical; background: var(--bg-card); color: var(--testo); }
+  .chat-input:focus { outline: none; border-color: var(--blu-light); }
+  .chat-counter { text-align: right; font-size: 10px; color: var(--testo-light); margin-top: 4px; font-family: 'Syne', sans-serif; }
+  .chat-errore { background: #fbe9e9; color: var(--rosso); padding: 8px 12px; border-radius: 4px; font-size: 12px; margin: 8px 0; border: 1px solid #d4a8a8; }
+
+  /* PUNTO DI INTESA */
+  .intesa-box { margin: 16px; padding: 14px 16px; background: #fdf6e0; border: 1px solid var(--oro); border-radius: 6px; }
+  .intesa-box.intesa-crist { background: #e8f3eb; border-color: var(--verde); border-width: 2px; }
+  .intesa-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; flex-wrap: wrap; gap: 6px; }
+  .intesa-titolo { font-family: 'Syne', sans-serif; font-weight: 700; font-size: 13px; color: var(--blu); letter-spacing: 0.02em; }
+  .badge-crist { display: inline-block; background: var(--verde); color: white; font-size: 10px; font-family: 'Syne', sans-serif; font-weight: 700; padding: 2px 8px; border-radius: 10px; margin-left: 8px; letter-spacing: 0.04em; }
+  .intesa-counter { font-size: 11px; color: var(--testo-light); font-family: 'Syne', sans-serif; font-weight: 600; }
+  .intesa-vuoto { color: var(--testo-light); font-size: 13px; line-height: 1.5; }
+  .intesa-vuoto p { margin-bottom: 10px; }
+  .intesa-testo { background: var(--bg-card); padding: 10px 12px; border-radius: 4px; border: 1px solid var(--bordo); white-space: pre-wrap; font-size: 13px; line-height: 1.55; color: var(--testo); }
+  .intesa-meta { font-size: 11px; color: var(--testo-light); margin-top: 8px; font-style: italic; }
+  .intesa-conferme { margin-top: 12px; padding-top: 10px; border-top: 1px dashed var(--bordo); }
+  .intesa-conferme-titolo { font-size: 11px; font-family: 'Syne', sans-serif; font-weight: 700; letter-spacing: 0.04em; color: var(--blu); margin-bottom: 6px; text-transform: uppercase; }
+  .intesa-conferme-lista { list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 4px 12px; font-size: 12px; }
+  .conferma-si { color: var(--verde); font-weight: 600; }
+  .conferma-no { color: var(--testo-light); }
+  .conferma-tag { font-size: 10px; opacity: 0.7; margin-left: 3px; }
+  .intesa-azioni { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+  .intesa-warn { background: #fbe9e9; border: 1px solid #d4a8a8; color: var(--rosso); padding: 8px 12px; border-radius: 4px; font-size: 12px; margin-bottom: 8px; }
+  .intesa-textarea { width: 100%; padding: 10px; border: 1px solid var(--bordo); border-radius: 4px; font-family: 'Source Serif 4', serif; font-size: 13px; box-sizing: border-box; background: var(--bg-card); color: var(--testo); }
+  .intesa-textarea:focus { outline: none; border-color: var(--blu-light); }
+  .intesa-crist-msg { background: #e8f3eb; color: var(--verde); padding: 10px 12px; border-radius: 4px; margin-top: 10px; font-size: 12px; border: 1px solid var(--verde); }
+
+  /* SUPERVISIONE DOCENTE */
+  .superv-grid { display: grid; grid-template-columns: 360px 1fr; gap: 16px; margin-top: 16px; }
+  .superv-panoramica { background: var(--bg-card); border: 1px solid var(--bordo); border-radius: 6px; padding: 14px; max-height: 75vh; overflow-y: auto; }
+  .superv-panoramica h3 { font-family: 'Syne', sans-serif; font-weight: 700; font-size: 12px; color: var(--blu); letter-spacing: 0.04em; text-transform: uppercase; margin-bottom: 8px; }
+  .superv-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .superv-table th, .superv-table td { padding: 6px 8px; border-bottom: 1px solid var(--bordo); text-align: left; }
+  .superv-table th { background: var(--blu); color: white; font-family: 'Syne', sans-serif; font-weight: 600; font-size: 10px; letter-spacing: 0.05em; text-transform: uppercase; }
+  .superv-table tbody tr { cursor: pointer; }
+  .superv-table tbody tr:hover { background: var(--bg); }
+  .superv-row-sel { background: #e8eef5 !important; font-weight: 600; }
+  .superv-dettaglio { background: var(--bg-card); border: 1px solid var(--bordo); border-radius: 6px; padding: 16px; }
+  .superv-dettaglio h3 { font-family: 'Syne', sans-serif; font-weight: 700; font-size: 15px; color: var(--blu); margin-bottom: 12px; }
+  .superv-dettaglio h4 { font-family: 'Syne', sans-serif; font-weight: 700; font-size: 12px; color: var(--blu); margin-bottom: 8px; letter-spacing: 0.04em; text-transform: uppercase; }
+  .superv-chat-window { background: var(--bg); border: 1px solid var(--bordo); border-radius: 4px; padding: 10px; height: 320px; overflow-y: auto; margin: 10px 0; }
+  .superv-msg { padding: 8px 10px; margin-bottom: 6px; background: var(--bg-card); border: 1px solid var(--bordo); border-radius: 4px; font-size: 12px; }
+  .superv-msg-head { margin-bottom: 4px; font-size: 11px; color: var(--testo-light); }
+  .superv-msg-sistema { background: #fdf6e0; border-color: var(--oro); }
+  .superv-msg-elim { opacity: 0.6; background: #fbe9e9; border-color: #d4a8a8; }
+  .superv-msg-body { white-space: pre-wrap; word-break: break-word; color: var(--testo); }
+  .superv-input-row { display: flex; gap: 8px; align-items: stretch; margin-top: 12px; }
+  .superv-intesa { margin-top: 18px; padding: 12px 14px; background: #fdf6e0; border: 1px solid var(--oro); border-radius: 4px; }
+  .muted { color: var(--testo-light); font-size: 12px; font-style: italic; }
+
   @media (max-width: 700px) {
     .landing-cards { grid-template-columns: 1fr; }
     .ballot-opzioni { grid-template-columns: 1fr 1fr; }
@@ -707,8 +809,567 @@ const css = `
     .voto-btn { padding: 5px 8px; font-size: 11px; }
     .delegazione-grid { grid-template-columns: 1fr 1fr; }
     .archivio-stats { grid-template-columns: repeat(4, 1fr); }
+    .superv-grid { grid-template-columns: 1fr; }
+    .intesa-conferme-lista { grid-template-columns: 1fr; }
+    .chat-finestra { height: 300px; }
   }
 `;
+// ═══════════════════════════════════════════════════════════════════════════
+// COMPONENTI CHAT WG / DELEGAZIONE + PUNTO DI INTESA (v3.1)
+// ═══════════════════════════════════════════════════════════════════════════
+
+// ── ChatGruppo: render unificato per chat WG e chat delegazione ────────────
+function ChatGruppo({ studente, tipoGruppo, gruppoId, etichetta, sottotitolo }) {
+  const [messaggi, setMessaggi] = useState([]);
+  const [bozza, setBozza] = useState("");
+  const [inviando, setInviando] = useState(false);
+  const [errore, setErrore] = useState("");
+  const [caricamento, setCaricamento] = useState(true);
+  const refFine = useRef(null);
+
+  const carica = useCallback(async function() {
+    const r = await apiCall("leggi_chat", {
+      tipoGruppo: tipoGruppo, gruppoId: gruppoId,
+      studenteId: studente.id,
+    });
+    if (r && r.ok) {
+      setMessaggi(r.messaggi || []);
+      setErrore("");
+    } else if (r && r.errore) {
+      setErrore(r.errore);
+    }
+    setCaricamento(false);
+  }, [studente.id, tipoGruppo, gruppoId]);
+
+  useEffect(function() {
+    carica();
+    const it = setInterval(carica, CHAT_POLLING_MS);
+    return function() { clearInterval(it); };
+  }, [carica]);
+
+  useEffect(function() {
+    if (refFine.current) refFine.current.scrollIntoView({ behavior: "smooth", block: "end" });
+  }, [messaggi.length]);
+
+  const invia = async function() {
+    const t = bozza.trim();
+    if (!t || inviando) return;
+    if (t.length > CHAT_MAX_MSG_LEN) {
+      setErrore("Messaggio troppo lungo (" + t.length + "/" + CHAT_MAX_MSG_LEN + ").");
+      return;
+    }
+    setInviando(true);
+    setErrore("");
+    const r = await apiCall("invia_messaggio", {
+      tipoGruppo: tipoGruppo, gruppoId: gruppoId,
+      studenteId: studente.id, testo: t,
+    });
+    if (r && r.ok) {
+      setBozza("");
+      await carica();
+    } else {
+      setErrore("Errore invio: " + ((r && r.errore) || "sconosciuto"));
+    }
+    setInviando(false);
+  };
+
+  const onKeyDown = function(e) {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      invia();
+    }
+  };
+
+  return (
+    <div className="chat-container">
+      <div className="chat-header">
+        <div>
+          <div className="chat-titolo">{etichetta}</div>
+          <div className="chat-sottotitolo">{sottotitolo}</div>
+        </div>
+        <div className="chat-stato">
+          {caricamento ? "⟳ caricamento…" : (messaggi.filter(function(m) { return !m.eliminato; }).length + " messaggi")}
+        </div>
+      </div>
+
+      <div className="chat-finestra">
+        {messaggi.length === 0 && !caricamento && (
+          <div className="chat-vuota">
+            Nessun messaggio. Inizia tu la discussione presentando la posizione della tua delegazione.
+          </div>
+        )}
+        {messaggi.map(function(m) {
+          return <MessaggioBubble key={m.id} m={m} mioId={studente.id} />;
+        })}
+        <div ref={refFine}></div>
+      </div>
+
+      <div className="chat-input-area">
+        {errore && <div className="chat-errore">{errore}</div>}
+        <div className="chat-input-row">
+          <textarea
+            className="chat-input"
+            placeholder="Scrivi un messaggio… (Invio = invia, Shift+Invio = a capo)"
+            value={bozza}
+            onChange={function(e) { setBozza(e.target.value); }}
+            onKeyDown={onKeyDown}
+            maxLength={CHAT_MAX_MSG_LEN}
+            rows={2}
+            disabled={inviando}
+          />
+          <button className="btn btn-primary" onClick={invia} disabled={inviando || !bozza.trim()}>
+            {inviando ? "Invio…" : "Invia"}
+          </button>
+        </div>
+        <div className="chat-counter">{bozza.length}/{CHAT_MAX_MSG_LEN}</div>
+      </div>
+
+      <PuntoIntesaPanel
+        studente={studente}
+        tipoGruppo={tipoGruppo}
+        gruppoId={gruppoId}
+      />
+    </div>
+  );
+}
+
+// ── MessaggioBubble ─────────────────────────────────────────────────────────
+function MessaggioBubble({ m, mioId }) {
+  const mio = String(m.studenteId) === String(mioId);
+  const sistema = !!m.sistema;
+  let cls = "msg-bubble";
+  if (sistema) cls += " msg-sistema";
+  else if (mio) cls += " msg-mio";
+  else cls += " msg-altrui";
+  if (m.eliminato) cls += " msg-eliminato";
+
+  return (
+    <div className={cls}>
+      <div className="msg-header">
+        <span>
+          {sistema ? "👨‍🏫 DOCENTE" : (m.nome || "—")}
+          {!sistema && m.paese && <span className="msg-paese"> · {m.paese}</span>}
+          {!sistema && m.wg && <span className="msg-wg"> · WG {m.wg}</span>}
+        </span>
+        <span className="msg-ora">{formattaOrarioMsg(m.timestamp)}</span>
+      </div>
+      <div className="msg-testo">
+        {m.eliminato
+          ? <em>[messaggio rimosso dal docente{m.motivoEliminazione ? ": " + m.motivoEliminazione : ""}]</em>
+          : m.testo}
+      </div>
+    </div>
+  );
+}
+
+// ── PuntoIntesaPanel ────────────────────────────────────────────────────────
+function PuntoIntesaPanel({ studente, tipoGruppo, gruppoId }) {
+  const [stato, setStato] = useState(null);
+  const [bozza, setBozza] = useState("");
+  const [modificando, setModificando] = useState(false);
+  const [errore, setErrore] = useState("");
+  const [salvando, setSalvando] = useState(false);
+
+  const carica = useCallback(async function() {
+    const r = await apiCall("leggi_intesa", {
+      tipoGruppo: tipoGruppo, gruppoId: gruppoId,
+      studenteId: studente.id,
+    });
+    if (r && r.ok) {
+      setStato(r);
+    } else if (r && r.errore) {
+      setErrore(r.errore);
+    }
+  }, [studente.id, tipoGruppo, gruppoId]);
+
+  useEffect(function() {
+    carica();
+    const it = setInterval(carica, INTESA_POLLING_MS);
+    return function() { clearInterval(it); };
+  }, [carica]);
+
+  // Quando arriva un nuovo stato e NON sto modificando, sincronizzo la bozza
+  useEffect(function() {
+    if (!modificando && stato && stato.intesa) {
+      setBozza(stato.intesa.testo || "");
+    }
+  }, [stato && stato.intesa && stato.intesa.testo, stato && stato.intesa && stato.intesa.timestampUltimoAgg, modificando]);
+
+  const salva = async function() {
+    const t = bozza.trim();
+    if (!t) { setErrore("Il testo non può essere vuoto."); return; }
+    if (t.length > CHAT_MAX_INTESA_LEN) {
+      setErrore("Testo troppo lungo (" + t.length + "/" + CHAT_MAX_INTESA_LEN + ").");
+      return;
+    }
+    setSalvando(true);
+    setErrore("");
+    const r = await apiCall("proponi_intesa", {
+      tipoGruppo: tipoGruppo, gruppoId: gruppoId,
+      studenteId: studente.id, testo: t,
+    });
+    if (r && r.ok) {
+      setModificando(false);
+      await carica();
+    } else {
+      setErrore("Errore: " + ((r && r.errore) || "sconosciuto"));
+    }
+    setSalvando(false);
+  };
+
+  const conferma = async function(val) {
+    setSalvando(true);
+    setErrore("");
+    const r = await apiCall("conferma_intesa", {
+      tipoGruppo: tipoGruppo, gruppoId: gruppoId,
+      studenteId: studente.id, confermato: val,
+    });
+    if (!r || !r.ok) setErrore("Errore: " + ((r && r.errore) || "sconosciuto"));
+    await carica();
+    setSalvando(false);
+  };
+
+  if (!stato) {
+    return <div className="intesa-box"><div className="muted">Caricamento punto di intesa…</div></div>;
+  }
+
+  const intesa = stato.intesa;
+  const cristallizzato = intesa && intesa.cristallizzato;
+  const haTesto = intesa && intesa.testo;
+  const mioConferma = stato.conferme.find(function(c) { return String(c.studenteId) === String(studente.id); });
+  const hoConfermato = mioConferma && mioConferma.confermato;
+
+  return (
+    <div className={"intesa-box " + (cristallizzato ? "intesa-crist" : "")}>
+      <div className="intesa-header">
+        <div className="intesa-titolo">
+          📜 PUNTO DI INTESA DEL GRUPPO
+          {cristallizzato && <span className="badge-crist">✓ CONSENSO RAGGIUNTO</span>}
+        </div>
+        <div className="intesa-counter">{stato.nConfermati}/{stato.nMembri} conferme</div>
+      </div>
+
+      {!haTesto && !modificando && (
+        <div className="intesa-vuoto">
+          <p>Nessun testo proposto. Quando il gruppo ha discusso a sufficienza, uno di voi può proporre il testo del punto di intesa.</p>
+          <button className="btn btn-ghost btn-sm" onClick={function() { setBozza(""); setModificando(true); }}>
+            Proponi un testo
+          </button>
+        </div>
+      )}
+
+      {haTesto && !modificando && (
+        <div>
+          <div className="intesa-testo">{intesa.testo}</div>
+          <div className="intesa-meta">
+            Proposto da <strong>{intesa.propostoDaNome}</strong>
+            {intesa.aggiornatoDa && intesa.aggiornatoDa !== intesa.propostoDaNome && (
+              <span> · ultimo aggiornamento: {intesa.aggiornatoDa}</span>
+            )}
+          </div>
+
+          <div className="intesa-conferme">
+            <div className="intesa-conferme-titolo">Stato delle conferme</div>
+            <ul className="intesa-conferme-lista">
+              {stato.membri.map(function(m) {
+                const cf = stato.conferme.find(function(c) { return String(c.studenteId) === String(m.id); });
+                const ok = cf && cf.confermato;
+                return (
+                  <li key={m.id} className={ok ? "conferma-si" : "conferma-no"}>
+                    {ok ? "✓" : "○"} {m.nome} {m.cognome}
+                    <span className="conferma-tag">
+                      {tipoGruppo === "wg" ? "(" + m.paese + ")" : "(WG " + m.wg + ")"}
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+
+          {!cristallizzato && (
+            <div className="intesa-azioni">
+              {!hoConfermato && (
+                <button className="btn btn-verde btn-sm" onClick={function() { conferma(true); }} disabled={salvando}>
+                  ✓ Confermo questo testo
+                </button>
+              )}
+              {hoConfermato && (
+                <button className="btn btn-ghost btn-sm" onClick={function() { conferma(false); }} disabled={salvando}>
+                  ↶ Ritira la mia conferma
+                </button>
+              )}
+              <button className="btn btn-ghost btn-sm" onClick={function() { setBozza(intesa.testo); setModificando(true); }} disabled={salvando}>
+                ✎ Modifica testo
+              </button>
+            </div>
+          )}
+
+          {cristallizzato && (
+            <div className="intesa-crist-msg">
+              ✓ Tutti i membri del gruppo hanno confermato. Il punto di intesa è ora cristallizzato. Solo il docente può riaprirlo.
+            </div>
+          )}
+        </div>
+      )}
+
+      {modificando && (
+        <div>
+          <div className="intesa-warn">
+            ⚠ Attenzione: modificando il testo, le conferme già date saranno invalidate e tutti i membri dovranno riconfermare.
+          </div>
+          <textarea
+            className="intesa-textarea"
+            value={bozza}
+            onChange={function(e) { setBozza(e.target.value); }}
+            maxLength={CHAT_MAX_INTESA_LEN}
+            rows={5}
+            placeholder="Scrivi qui il testo del punto di intesa che il gruppo intende proporre…"
+            disabled={salvando}
+          />
+          <div className="chat-counter">{bozza.length}/{CHAT_MAX_INTESA_LEN}</div>
+          <div className="intesa-azioni">
+            <button className="btn btn-primary btn-sm" onClick={salva} disabled={salvando || !bozza.trim()}>
+              {salvando ? "Salvataggio…" : "Salva proposta"}
+            </button>
+            <button className="btn btn-ghost btn-sm" onClick={function() { setModificando(false); setBozza((intesa && intesa.testo) || ""); }} disabled={salvando}>
+              Annulla
+            </button>
+          </div>
+        </div>
+      )}
+
+      {errore && <div className="chat-errore" style={{ marginTop: 10 }}>{errore}</div>}
+    </div>
+  );
+}
+
+// ── Wrapper per le due tab studente ─────────────────────────────────────────
+function TabChatWG({ studente }) {
+  const wgId = "WG_" + parseInt(studente.wg);
+  return (
+    <ChatGruppo
+      studente={studente}
+      tipoGruppo="wg"
+      gruppoId={wgId}
+      etichetta={"💬 CHAT " + (NOMI_WG[wgId] || wgId).toUpperCase()}
+      sottotitolo="Coordinamento tra delegazioni nazionali sullo stesso tema tecnico"
+    />
+  );
+}
+
+function TabChatDelegazione({ studente }) {
+  return (
+    <ChatGruppo
+      studente={studente}
+      tipoGruppo="del"
+      gruppoId={studente.paese}
+      etichetta={"🏛️ CHAT DELEGAZIONE " + nomePaeseEsteso(studente.paese).toUpperCase()}
+      sottotitolo="Coordinamento interno alla delegazione nazionale (i 4 WG del Paese)"
+    />
+  );
+}
+
+// ── DocenteSupervisioneChat ─────────────────────────────────────────────────
+function DocenteSupervisioneChat() {
+  const [panoramica, setPanoramica] = useState([]);
+  const [selezione, setSelezione] = useState(null);
+  const [messaggi, setMessaggi] = useState([]);
+  const [bozzaSistema, setBozzaSistema] = useState("");
+  const [errore, setErrore] = useState("");
+  const [intesaSel, setIntesaSel] = useState(null);
+
+  const caricaPanoramica = useCallback(async function() {
+    const r = await apiCall("panoramica_intese", {});
+    if (r && r.ok) setPanoramica(r.panoramica || []);
+    else if (r && r.errore) setErrore("Panoramica: " + r.errore);
+  }, []);
+
+  const caricaSelezione = useCallback(async function() {
+    if (!selezione) return;
+    const r1 = await apiCall("leggi_chat", { tipoGruppo: selezione.tipoGruppo, gruppoId: selezione.gruppoId });
+    if (r1 && r1.ok) setMessaggi(r1.messaggi || []);
+    const r2 = await apiCall("leggi_intesa", { tipoGruppo: selezione.tipoGruppo, gruppoId: selezione.gruppoId });
+    if (r2 && r2.ok) setIntesaSel(r2);
+  }, [selezione]);
+
+  useEffect(function() {
+    caricaPanoramica();
+    const it = setInterval(caricaPanoramica, 10000);
+    return function() { clearInterval(it); };
+  }, [caricaPanoramica]);
+
+  useEffect(function() {
+    if (!selezione) return;
+    caricaSelezione();
+    const it = setInterval(caricaSelezione, CHAT_POLLING_MS);
+    return function() { clearInterval(it); };
+  }, [selezione, caricaSelezione]);
+
+  const inviaSistema = async function() {
+    const t = bozzaSistema.trim();
+    if (!t || !selezione) return;
+    const r = await apiCall("invia_messaggio", {
+      tipoGruppo: selezione.tipoGruppo, gruppoId: selezione.gruppoId, testo: t,
+    });
+    if (r && r.ok) {
+      setBozzaSistema("");
+      caricaSelezione();
+    } else {
+      setErrore("Invio: " + ((r && r.errore) || "errore"));
+    }
+  };
+
+  const elimina = async function(id) {
+    const motivo = window.prompt("Motivo dell'eliminazione (opzionale, visibile come spiegazione agli studenti):", "");
+    if (motivo === null) return;
+    const r = await apiCall("elimina_messaggio", { id: id, motivo: motivo });
+    if (!r || !r.ok) setErrore("Eliminazione: " + ((r && r.errore) || "errore"));
+    caricaSelezione();
+  };
+
+  const riapri = async function() {
+    if (!selezione) return;
+    if (!window.confirm("Riaprire il punto di intesa annullando lo stato di consenso? Le conferme già date NON vengono cancellate.")) return;
+    const r = await apiCall("riapri_intesa", { tipoGruppo: selezione.tipoGruppo, gruppoId: selezione.gruppoId });
+    if (!r || !r.ok) setErrore("Riapertura: " + ((r && r.errore) || "errore"));
+    caricaSelezione();
+  };
+
+  const wgRows = panoramica.filter(function(p) { return p.tipoGruppo === "wg"; });
+  const delRows = panoramica.filter(function(p) { return p.tipoGruppo === "del"; });
+
+  return (
+    <div>
+      <div className="card">
+        <div className="card-title">👁 Supervisione chat e punti di intesa</div>
+        <div className="card-sub">
+          Vista in tempo reale di tutte le 11 chat (4 Working Group + 7 delegazioni nazionali). La panoramica si aggiorna automaticamente ogni 10 secondi; la chat selezionata ogni 6 secondi.
+        </div>
+      </div>
+
+      <div className="superv-grid">
+        <div className="superv-panoramica">
+          <h3>Working Group</h3>
+          <table className="superv-table">
+            <thead><tr><th>Gruppo</th><th>Intesa</th><th>Conf.</th><th>Stato</th></tr></thead>
+            <tbody>
+              {wgRows.map(function(r) {
+                const sel = selezione && selezione.gruppoId === r.gruppoId && selezione.tipoGruppo === "wg";
+                return (
+                  <tr key={r.gruppoId}
+                      className={sel ? "superv-row-sel" : ""}
+                      onClick={function() { setSelezione({ tipoGruppo: "wg", gruppoId: r.gruppoId }); }}>
+                    <td>{NOMI_WG[r.gruppoId] || r.gruppoId}</td>
+                    <td>{r.hasTesto ? "📜 sì" : "—"}</td>
+                    <td>{r.nConfermati}/{r.nMembri}</td>
+                    <td>{r.cristallizzato ? "✓ Cristallizzato" : (r.hasTesto ? "In corso" : "—")}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+
+          <h3 style={{ marginTop: 18 }}>Delegazioni</h3>
+          <table className="superv-table">
+            <thead><tr><th>Paese</th><th>Intesa</th><th>Conf.</th><th>Stato</th></tr></thead>
+            <tbody>
+              {delRows.map(function(r) {
+                const sel = selezione && selezione.gruppoId === r.gruppoId && selezione.tipoGruppo === "del";
+                const p = PAESI.find(function(x) { return x.id === r.gruppoId; });
+                return (
+                  <tr key={r.gruppoId}
+                      className={sel ? "superv-row-sel" : ""}
+                      onClick={function() { setSelezione({ tipoGruppo: "del", gruppoId: r.gruppoId }); }}>
+                    <td>{p ? (p.emoji + " " + p.nome) : r.gruppoId}</td>
+                    <td>{r.hasTesto ? "📜 sì" : "—"}</td>
+                    <td>{r.nConfermati}/{r.nMembri}</td>
+                    <td>{r.cristallizzato ? "✓ Cristallizzato" : (r.hasTesto ? "In corso" : "—")}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="superv-dettaglio">
+          {!selezione && <div className="muted">Seleziona un gruppo a sinistra per vedere chat e punto di intesa.</div>}
+          {selezione && (
+            <div>
+              <h3>
+                {selezione.tipoGruppo === "wg"
+                  ? (NOMI_WG[selezione.gruppoId] || selezione.gruppoId)
+                  : ("Delegazione " + nomePaeseEsteso(selezione.gruppoId))}
+              </h3>
+
+              <h4>Messaggi</h4>
+              <div className="superv-chat-window">
+                {messaggi.length === 0 && <div className="muted">Nessun messaggio.</div>}
+                {messaggi.map(function(m) {
+                  let cls = "superv-msg";
+                  if (m.eliminato) cls += " superv-msg-elim";
+                  if (m.sistema) cls += " superv-msg-sistema";
+                  return (
+                    <div key={m.id} className={cls}>
+                      <div className="superv-msg-head">
+                        <strong>{m.sistema ? "👨‍🏫 DOCENTE" : m.nome}</strong>
+                        {!m.sistema && <span> · {m.paese} · WG {m.wg}</span>}
+                        <span style={{ float: "right" }}>{formattaOrarioMsg(m.timestamp)}</span>
+                      </div>
+                      <div className="superv-msg-body">
+                        {m.eliminato
+                          ? <em>[eliminato{m.motivoEliminazione ? ": " + m.motivoEliminazione : ""}] originale: {m.testo}</em>
+                          : m.testo}
+                      </div>
+                      {!m.eliminato && !m.sistema && (
+                        <button className="btn btn-danger btn-sm" onClick={function() { elimina(m.id); }} style={{ marginTop: 6 }}>
+                          Elimina
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+
+              <h4>Invia messaggio di sistema</h4>
+              <div className="superv-input-row">
+                <textarea
+                  className="chat-input"
+                  rows={2}
+                  placeholder="Apparirà nella chat con etichetta [DOCENTE]…"
+                  value={bozzaSistema}
+                  onChange={function(e) { setBozzaSistema(e.target.value); }}
+                  maxLength={CHAT_MAX_MSG_LEN}
+                />
+                <button className="btn btn-primary" onClick={inviaSistema} disabled={!bozzaSistema.trim()}>
+                  Invia come DOCENTE
+                </button>
+              </div>
+
+              {intesaSel && intesaSel.intesa && intesaSel.intesa.testo && (
+                <div className="superv-intesa">
+                  <h4>📜 Punto di intesa</h4>
+                  <div className="intesa-testo">{intesaSel.intesa.testo}</div>
+                  <div className="muted" style={{ marginTop: 8 }}>
+                    Proposto da: {intesaSel.intesa.propostoDaNome} · {intesaSel.nConfermati}/{intesaSel.nMembri} conferme
+                    {intesaSel.intesa.cristallizzato && " · ✓ CRISTALLIZZATO"}
+                  </div>
+                  {intesaSel.intesa.cristallizzato && (
+                    <button className="btn btn-ghost btn-sm" onClick={riapri} style={{ marginTop: 10 }}>
+                      ↺ Riapri (annulla cristallizzazione)
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {errore && <div className="chat-errore" style={{ marginTop: 12 }}>{errore}</div>}
+    </div>
+  );
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // COMPONENTE ROOT
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1185,6 +1846,8 @@ function StudenteApp({ studente: initialStudente, onUpdate }) {
   const tabs = [
     ["home", "🏠 Home"],
     ["scheda", "📋 Scheda WG"],
+    ["chat-wg", "💬 Chat WG"],
+    ["chat-del", "🏛️ Delegazione (chat)"],
     ["ballot", "🗳️ Ballot"],
     ["delegazione", "🤝 Delegazione"],
     ["nwip", "📄 NWIP"],
@@ -1212,6 +1875,8 @@ function StudenteApp({ studente: initialStudente, onUpdate }) {
 
       {view === "home"        && <StudenteHome studente={studente} wgData={wgData} tutteVisitate={tutteVisitate} onMarca={function() { aggiornaStudente({ completato: true }); }} onGo={setView} />}
       {view === "scheda"      && <StudenteScheda studente={studente} wgData={wgData} segnaVisitata={segnaVisitata} />}
+      {view === "chat-wg"     && <TabChatWG studente={studente} />}
+      {view === "chat-del"    && <TabChatDelegazione studente={studente} />}
       {view === "ballot"      && <StudenteBallot studente={studente} wgData={wgData} aggiornaStudente={aggiornaStudente} />}
       {view === "delegazione" && <StudenteDelegazione studente={studente} aggiornaStudente={aggiornaStudente} />}
       {view === "nwip"        && <NwipView />}
@@ -1759,6 +2424,7 @@ function DocenteApp({ email }) {
   const tabs = [
     ["registro",    "👥 Registro"],
     ["sintesi",     "✍️ Sintesi"],
+    ["supervisione","👁 Chat & intese"],
     ["pannello",    "🎙️ Pannello Chair"],
     ["plenaria",    "🗳️ Scrutinio"],
     ["risultato",   "📊 Risultato"],
@@ -1780,6 +2446,7 @@ function DocenteApp({ email }) {
 
       {tab === "registro"     && <DocenteRegistro studenti={studenti} loading={loadingStudenti} ricarica={caricaStudenti} />}
       {tab === "sintesi"      && <DocenteSintesi />}
+      {tab === "supervisione" && <DocenteSupervisioneChat />}
       {tab === "pannello"     && <DocentePannelloChair studenti={studenti} votiBackend={votiBackend} ricaricaVoti={caricaVoti} ricaricaStudenti={caricaStudenti} />}
       {tab === "plenaria"     && <DocentePlenaria votiBackend={votiBackend} ricaricaVoti={caricaVoti} />}
       {tab === "risultato"    && <DocenteRisultato studenti={studenti} votiBackend={votiBackend} />}
