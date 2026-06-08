@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Simulazione ISO/TC 20/SC 16 — UAS · ITTL Classe 3ª</title>
- 
+
 <!-- React 18 + Babel Standalone -->
 <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
@@ -2675,20 +2675,119 @@ function StudenteDebriefing({ studente }) {
 // ═══════════════════════════════════════════════════════════════════════════
 // NWIP View e GLOSSARIO (condivisi)
 // ═══════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════
+// NWIP View (STUDENTE) — lettura della bozza in sola lettura
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Lo studente NON può modificare la NWIP: la bozza è in carico al docente
+// (NWIPEditor). Il backend lo protegge a livello di azione (`set_nwip` è
+// `rich(isDocente, …)`); qui rispettiamo la regola anche sul piano dell'UI,
+// mostrando il contenuto come testo non editabile.
+//
+// La bozza viene letta via `get_nwip` (azione pubblica) e ripolla ogni 25 s
+// per cogliere le modifiche che il docente effettua dal Pannello Chair o
+// dalla tab dedicata durante la plenaria.
 function NwipView() {
+  const [titolo, setTitolo] = useState("");
+  const [testo, setTesto] = useState("");
+  const [ultimaModifica, setUltimaModifica] = useState("");
+  const [modificatoDa, setModificatoDa] = useState("");
+  const [loading, setLoading] = useState(true);
+
+  const carica = async function() {
+    const res = await apiCall("get_nwip", {});
+    if (res && res.ok && res.nwip) {
+      setTitolo(res.nwip.titolo || "");
+      setTesto(res.nwip.testo || "");
+      setUltimaModifica(res.nwip.ultimaModifica || "");
+      setModificatoDa(res.nwip.modificatoDa || "");
+    }
+    setLoading(false);
+  };
+
+  useEffect(function() {
+    carica();
+    // Polling moderato: 25 s. Lo studente non può intervenire, quindi non c'è
+    // rischio di sovrascrivere nulla; un intervallo più breve sarebbe spreco.
+    const t = setInterval(carica, 25000);
+    return function() { clearInterval(t); };
+  }, []);
+
+  const tsFormat = function(iso) {
+    if (!iso) return "—";
+    try {
+      const d = new Date(iso);
+      return d.toLocaleString("it-IT", {
+        day: "2-digit", month: "2-digit", year: "numeric",
+        hour: "2-digit", minute: "2-digit"
+      });
+    } catch (e) { return iso; }
+  };
+
+  const haContenuto = (titolo && titolo.trim().length > 0) ||
+                      (testo  && testo.trim().length  > 0);
+
   return (
     <div>
-      <div className="nwip-box">
-        <div className="nwip-label">NEW WORK ITEM PROPOSAL — ISO/TC 20/SC 16 N-XXX</div>
-        <div className="nwip-titolo">Aerospace — Unmanned Aircraft Systems (UAS) — Minimum requirements for remote identification, operational limits, operator certification and scope of application in non-segregated civil airspace</div>
-        <div className="nwip-row"><span className="nwip-key">Proponente:</span><span>AFNOR (Francia)</span></div>
-        <div className="nwip-row"><span className="nwip-key">Co-proponenti:</span><span>DIN (Germania), JSA (Giappone)</span></div>
-        <div className="nwip-row" style={{ marginTop: 8 }}><span className="nwip-key">Motivazione:</span><span>EASA (Reg. UE 2019/945) e FAA (14 CFR Part 107) hanno sviluppato requisiti tecnici parzialmente divergenti. Una norma ISO armonizzata fornirebbe una base tecnica comune.</span></div>
-        <div className="nwip-row" style={{ marginTop: 8 }}><span className="nwip-key">Scope:</span><span>UAS con MTOW tra 250 g e 25 kg in spazio aereo civile non segregato (VLOS e BVLOS), uso commerciale e ricreativo avanzato.</span></div>
-        <div className="nwip-row"><span className="nwip-key">Esclusi:</span><span>MTOW &lt; 250 g · droni militari · spazio aereo segregato</span></div>
+      {/* Banner di sola lettura — chiarisce all'allievo perché non può modificare */}
+      <div style={{
+        background: "#fff8e7", border: "1px solid #d9b96a", borderLeft: "4px solid var(--oro)",
+        padding: "10px 14px", borderRadius: 4, marginBottom: 12, fontSize: 12, lineHeight: 1.5
+      }}>
+        <strong>📄 Bozza NWIP — sola lettura.</strong> La bozza della <em>New Work Item Proposal</em> è
+        in carico al Chair (docente): durante la plenaria può essere aggiornata in base agli emendamenti.
+        Gli esperti delle delegazioni non la modificano direttamente; il loro contributo passa attraverso
+        gli interventi in plenaria, le chat di WG e di delegazione, e i punti di intesa.
       </div>
+
+      {loading ? (
+        <div className="loading">Carico la bozza pubblicata dal Chair…</div>
+      ) : haContenuto ? (
+        <>
+          <div className="nwip-box">
+            <div className="nwip-label">NEW WORK ITEM PROPOSAL — ISO/TC 20/SC 16</div>
+            <div className="nwip-titolo">{titolo || "(senza titolo)"}</div>
+            {testo && testo.trim().length > 0 && (
+              <div style={{
+                whiteSpace: "pre-wrap",
+                marginTop: 14, paddingTop: 12,
+                borderTop: "1px solid rgba(255,255,255,0.25)",
+                fontFamily: "'Source Serif 4', serif", fontSize: 14, lineHeight: 1.65
+              }}>
+                {testo}
+              </div>
+            )}
+          </div>
+          <div style={{ fontSize: 11, color: "var(--testo-light)", textAlign: "right", marginTop: -8, marginBottom: 16 }}>
+            Ultimo aggiornamento: <strong>{tsFormat(ultimaModifica)}</strong>
+            {modificatoDa && <span> · da <em>{modificatoDa}</em></span>}
+            {" · "}<button
+              onClick={carica}
+              style={{ background: "none", border: "none", color: "var(--blu-light)", cursor: "pointer", fontSize: 11, padding: 0, textDecoration: "underline" }}
+              title="Ricarica subito la bozza dal backend"
+            >ricarica</button>
+          </div>
+        </>
+      ) : (
+        <div className="card" style={{ textAlign: "center", color: "var(--testo-light)", padding: 28 }}>
+          <div style={{ fontFamily: "Syne, sans-serif", fontWeight: 700, fontSize: 14, color: "var(--blu)", marginBottom: 6 }}>
+            La bozza NWIP non è ancora stata pubblicata
+          </div>
+          <div style={{ fontSize: 13, lineHeight: 1.55 }}>
+            Il Chair non ha ancora salvato il testo della <em>New Work Item Proposal</em>.
+            La bozza apparirà qui non appena verrà pubblicata: la pagina si aggiorna automaticamente
+            ogni 25 secondi.
+          </div>
+        </div>
+      )}
+
+      {/* Sintesi didattica dei 4 temi in discussione — invariato, utile per orientarsi */}
       <div className="card">
         <div className="card-title">I 4 temi in discussione</div>
+        <div className="card-sub">
+          Promemoria dei quattro nodi tecnici che saranno discussi in plenaria. La trattazione di
+          dettaglio è nelle schede di Working Group.
+        </div>
         {Object.entries(WG_DATA).map(function(entry) {
           const num = entry[0], wg = entry[1];
           return (
