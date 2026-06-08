@@ -5,8 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Simulazione ISO/TC 20/SC 16 — UAS · ITTL Classe 3ª</title>
 
- 
-<!-- React 18 + Babel Standalone --> 
+<!-- React 18 + Babel Standalone -->
 <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -206,11 +205,32 @@ const DOMANDE_DEBRIEFING = [
   { id: "cambio", tipo: "chiusa",
     domanda: "Hai cambiato la tua posizione tra il voto preliminare e il voto finale?",
     opzioni: ["Sì, ho cambiato voto", "No, stesso voto", "No, ma stavo per farlo"] },
-  { id: "domanda1", tipo: "aperta",
-    domanda: "Il tuo paese ha difeso una posizione che non condividevi personalmente? Cosa è stato più difficile?" },
-  { id: "domanda2", tipo: "aperta",
-    domanda: "Un piccolo produttore italiano di droni: preferisce che esista questa norma o no? Perché?" },
+  { id: "comune", tipo: "aperta",
+    colonna: "rispostaDomanda1",
+    domanda: "Sulla base della simulazione che hai vissuto, descrivi con parole tue come funziona il processo di standardizzazione ISO: quali sono i ruoli coinvolti (P-member, O-member, Working Group, Delegato Capo), quali fasi attraversa una proposta normativa (NWIP, WD, CD, DIS, FDIS, IS) e quali regole determinano l'approvazione di una bozza al voto plenario. Cita almeno due aspetti del funzionamento ISO che ti sono diventati chiari grazie alla simulazione e che non avresti compreso leggendo solo la teoria." },
 ];
+
+// Domanda aperta condizionata dal ruolo dello studente.
+// Determinata da wg === 4 (Delegato Capo) vs wg ∈ {1,2,3} (Esperto WG).
+const DOMANDA_RUOLO_DEBRIEFING = {
+  capo: {
+    domanda: "Sei riuscito a far convergere i tre esperti del tuo paese su una posizione unitaria? Se sì, descrivi come; se no, indica dove si è bloccato il dialogo interno alla delegazione.",
+  },
+  esperto: {
+    domanda: "Sul tuo specifico nodo tecnico, quale paese o quale esperto ha portato gli argomenti più convincenti? In cosa erano migliori dei tuoi?",
+  },
+};
+
+// Item della scala Likert (1 = Per niente d'accordo, 5 = Molto d'accordo).
+// I valori vengono salvati come interi 1-5, oppure stringa vuota se non risposti.
+const ITEM_LIKERT_DEBRIEFING = [
+  { id: "likert1", testo: "Ho compreso la posizione del mio paese sulle norme UAS" },
+  { id: "likert2", testo: "Ho compreso le posizioni degli altri tre WG del mio paese" },
+  { id: "likert3", testo: "La mia delegazione ha lavorato come una squadra" },
+  { id: "likert4", testo: "Rifarei la simulazione con una preparazione tecnica preventiva più approfondita" },
+];
+
+const LIKERT_ETICHETTE = { 1: "Per niente", 5: "Molto" };
 
 // ═══════════════════════════════════════════════════════════════════════════
 // COSTANTI MODULO CHAT (v3.1)
@@ -305,6 +325,7 @@ const OFF_KEY_INTR = "iso_offline_interventi";
 const OFF_KEY_DBRF = "iso_offline_debriefing";
 const OFF_KEY_ARCH = "iso_offline_archivio";
 const OFF_KEY_NWIP = "iso_offline_nwip"; // bozza NWIP (oggetto, non array)
+const OFF_KEY_DBRF_STATO = "iso_offline_debriefingStato"; // { aperto: bool, apertoTimestamp: ISO|null }
 function offRead(k) { try { return JSON.parse(localStorage.getItem(k) || "[]"); } catch(e) { return []; } }
 function offWrite(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch(e) {} }
 
@@ -396,17 +417,56 @@ async function apiOffline(action, p) {
       return { ok: true };
     }
     case "get_voti": return { ok: true, voti: voti };
-    case "reset_plenaria": { offWrite(OFF_KEY_VOTI, []); offWrite(OFF_KEY_INTR, []); offWrite(OFF_KEY_DBRF, []); return { ok: true }; }
+    case "reset_plenaria": {
+      offWrite(OFF_KEY_VOTI, []); offWrite(OFF_KEY_INTR, []); offWrite(OFF_KEY_DBRF, []);
+      try { localStorage.removeItem(OFF_KEY_DBRF_STATO); } catch(e) {}
+      return { ok: true };
+    }
     case "registra_intervento": {
       const intr = offRead(OFF_KEY_INTR); intr.push({ ...p, timestamp: new Date().toISOString() }); offWrite(OFF_KEY_INTR, intr);
       return { ok: true };
     }
     case "get_interventi": return { ok: true, interventi: offRead(OFF_KEY_INTR) };
     case "salva_debriefing": {
-      const dbrf = offRead(OFF_KEY_DBRF); dbrf.push({ ...p, timestamp: new Date().toISOString() }); offWrite(OFF_KEY_DBRF, dbrf);
+      const dbrf = offRead(OFF_KEY_DBRF);
+      // Controllo di unicità coerente con il backend: ogni studente può inviare una sola volta.
+      const sid = String(p.studenteId || "").trim();
+      if (!sid) return { ok: false, errore: "studenteId mancante: impossibile salvare il debriefing." };
+      if (dbrf.some(function(r) { return String(r.studenteId) === sid; })) {
+        return { ok: false, errore: "Debriefing già inviato per questo studente." };
+      }
+      dbrf.push({ ...p, studenteId: sid, timestamp: new Date().toISOString() });
+      offWrite(OFF_KEY_DBRF, dbrf);
       return { ok: true };
     }
     case "get_debriefing": return { ok: true, debriefing: offRead(OFF_KEY_DBRF) };
+    case "verifica_debriefing_inviato": {
+      const sid = String(p.studenteId || "").trim();
+      if (!sid) return { ok: false, errore: "studenteId mancante." };
+      const trovata = offRead(OFF_KEY_DBRF).filter(function(r) { return String(r.studenteId) === sid; })[0];
+      return trovata
+        ? { ok: true, inviato: true, timestamp: trovata.timestamp || null }
+        : { ok: true, inviato: false, timestamp: null };
+    }
+    case "apri_debriefing": {
+      const ts = new Date().toISOString();
+      try { localStorage.setItem(OFF_KEY_DBRF_STATO, JSON.stringify({ aperto: true, apertoTimestamp: ts })); } catch(e) {}
+      return { ok: true, aperto: true, apertoTimestamp: ts };
+    }
+    case "chiudi_debriefing": {
+      try {
+        const cur = JSON.parse(localStorage.getItem(OFF_KEY_DBRF_STATO) || "{}");
+        cur.aperto = false;
+        localStorage.setItem(OFF_KEY_DBRF_STATO, JSON.stringify(cur));
+      } catch(e) {}
+      return { ok: true, aperto: false };
+    }
+    case "stato_debriefing": {
+      try {
+        const cur = JSON.parse(localStorage.getItem(OFF_KEY_DBRF_STATO) || "{}");
+        return { ok: true, aperto: !!cur.aperto, apertoTimestamp: cur.apertoTimestamp || null };
+      } catch(e) { return { ok: true, aperto: false, apertoTimestamp: null }; }
+    }
     case "diagnostica_coerenza": {
       const diag = PAESI.map(function(p) {
         const dele = st.filter(function(s) { return s.paese === p.id; });
@@ -735,6 +795,27 @@ const css = `
   .debrief-opzione { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border: 1px solid var(--bordo); border-radius: 4px; margin-bottom: 6px; cursor: pointer; transition: all 0.15s; font-size: 13px; }
   .debrief-opzione:hover { border-color: var(--blu-light); background: var(--bg); }
   .debrief-opzione.scelta { border-color: var(--verde); background: #f0faf4; }
+
+  /* Scala Likert (1-5) — pulsanti circolari con etichette estreme */
+  .likert-riga { display: flex; align-items: center; gap: 10px; margin-top: 8px; flex-wrap: wrap; }
+  .likert-etichetta { font-size: 11px; color: var(--testo-light); font-family: 'Syne', sans-serif; font-weight: 600; white-space: nowrap; min-width: 64px; }
+  .likert-etichetta.destra { text-align: right; }
+  .likert-pallini { display: flex; gap: 8px; flex: 1; justify-content: center; }
+  .likert-pallino {
+    width: 36px; height: 36px; border-radius: 50%; border: 1.5px solid var(--bordo);
+    background: white; font-family: 'Syne', sans-serif; font-weight: 700; font-size: 13px;
+    color: var(--testo-light); cursor: pointer; transition: all 0.15s;
+    display: inline-flex; align-items: center; justify-content: center;
+  }
+  .likert-pallino:hover:not(.scelto) { border-color: var(--blu-light); background: var(--bg); }
+  .likert-pallino.scelto { border-color: var(--verde); background: var(--verde); color: white; }
+
+  /* Riga statistica Likert nel pannello docente */
+  .likert-stat-riga { display: flex; align-items: center; gap: 6px; font-size: 11px; margin-bottom: 4px; }
+  .likert-stat-label { min-width: 16px; text-align: right; font-family: 'Syne', sans-serif; font-weight: 700; color: var(--blu); }
+  .likert-stat-barra { flex: 1; height: 14px; background: #f0f0f0; border-radius: 3px; overflow: hidden; }
+  .likert-stat-fill { height: 100%; background: var(--blu-light); }
+  .likert-stat-conteggio { min-width: 24px; text-align: left; color: var(--testo-light); }
 
   /* SLOT SELECTION UI */
   .slot-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px; margin-top: 8px; }
@@ -1826,6 +1907,7 @@ function StudenteRegistrazione({ onLogin, onBack }) {
 function StudenteApp({ studente: initialStudente, onUpdate }) {
   const [studente, setStudente] = useState(initialStudente);
   const [view, setView] = useState("home");
+  const [debriefingAperto, setDebriefingAperto] = useState(false);
   const wgData = WG_DATA[studente.wg];
 
   // Poll periodico: aggiorna lo studente dal backend per rilevare modifiche del docente
@@ -1845,6 +1927,28 @@ function StudenteApp({ studente: initialStudente, onUpdate }) {
     }, 30000);
     return function() { clearInterval(timer); };
   }, [studente.id]);
+
+  // Poll stato fase di debriefing: ogni 15 s ricontrolla se il docente
+  // ha aperto/chiuso la fase. Se il tab corrente è "debriefing" e la fase
+  // viene chiusa, si torna in automatico alla home per evitare di restare
+  // su un tab che è appena scomparso.
+  useEffect(function() {
+    let attivo = true;
+    const aggiorna = async function() {
+      const res = await apiCall("stato_debriefing", {});
+      if (!attivo) return;
+      if (res && res.ok) {
+        setDebriefingAperto(function(prev) {
+          const nuovo = !!res.aperto;
+          if (prev && !nuovo && view === "debriefing") setView("home");
+          return nuovo;
+        });
+      }
+    };
+    aggiorna();
+    const t = setInterval(aggiorna, 15000);
+    return function() { attivo = false; clearInterval(t); };
+  }, [view]);
 
   const aggiornaStudente = async function(updates) {
     const updated = { ...studente, ...updates };
@@ -1874,6 +1978,7 @@ function StudenteApp({ studente: initialStudente, onUpdate }) {
     ["delegazione", "🤝 Delegazione"],
     ["nwip", "📄 NWIP"],
     ["glossario", "📖 Glossario"],
+    ...(debriefingAperto ? [["debriefing", "💬 Debriefing"]] : []),
   ];
 
   return (
@@ -1903,6 +2008,7 @@ function StudenteApp({ studente: initialStudente, onUpdate }) {
       {view === "delegazione" && <StudenteDelegazione studente={studente} aggiornaStudente={aggiornaStudente} />}
       {view === "nwip"        && <NwipView />}
       {view === "glossario"   && <GlossarioView />}
+      {view === "debriefing"  && <StudenteDebriefing studente={studente} />}
     </div>
   );
 }
@@ -2269,6 +2375,303 @@ function StudenteDelegazione({ studente, aggiornaStudente }) {
     </div>
   );
 }
+// ═══════════════════════════════════════════════════════════════════════════
+// STUDENTE: DEBRIEFING POST-PLENARIA (sondaggio non modificabile dopo invio)
+// ═══════════════════════════════════════════════════════════════════════════
+function StudenteDebriefing({ studente }) {
+  // Stati possibili della fase: 'caricamento' | 'chiuso' | 'gia_inviato' | 'compilazione' | 'invio' | 'inviato' | 'errore'
+  const [statoFase, setStatoFase] = useState("caricamento");
+  const [erroreInvio, setErroreInvio] = useState("");
+  const [timestampInvioPrecedente, setTimestampInvioPrecedente] = useState(null);
+  const [confermaModale, setConfermaModale] = useState(false);
+
+  // Risposte
+  const [rispostaCambio, setRispostaCambio] = useState("");
+  const [rispostaComune, setRispostaComune] = useState("");
+  const [rispostaRuolo, setRispostaRuolo] = useState("");
+  const [likert, setLikert] = useState({ likert1: "", likert2: "", likert3: "", likert4: "" });
+
+  const isCapo = parseInt(studente.wg) === 4;
+  const domandaRuolo = isCapo ? DOMANDA_RUOLO_DEBRIEFING.capo : DOMANDA_RUOLO_DEBRIEFING.esperto;
+  const paeseInfo = PAESI.filter(function(x) { return x.id === studente.paese; })[0];
+  const etichettaIntestazione = (paeseInfo ? paeseInfo.emoji + " " + paeseInfo.nome : studente.paese) +
+                                " · WG " + studente.wg +
+                                (isCapo ? " · Delegato Capo" : " · Esperto WG");
+
+  // All'apertura: legge lo stato della fase, e — se aperta — verifica se questo
+  // studente ha già inviato (NB: usa l'azione pubblica verifica_debriefing_inviato,
+  // che restituisce solo bool+timestamp, mai i contenuti delle risposte altrui).
+  useEffect(function() {
+    let attivo = true;
+    const inizializza = async function() {
+      const stato = await apiCall("stato_debriefing", {});
+      if (!attivo) return;
+      if (!stato.ok) { setStatoFase("errore"); setErroreInvio(stato.errore || "Errore di lettura stato."); return; }
+      if (!stato.aperto) { setStatoFase("chiuso"); return; }
+      // Fase aperta: verifico se questo studente ha già inviato
+      const ver = await apiCall("verifica_debriefing_inviato", { studenteId: studente.id });
+      if (!attivo) return;
+      if (!ver.ok) { setStatoFase("errore"); setErroreInvio(ver.errore || "Errore di verifica invio."); return; }
+      if (ver.inviato) {
+        setTimestampInvioPrecedente(ver.timestamp || null);
+        setStatoFase("gia_inviato");
+      } else {
+        setStatoFase("compilazione");
+      }
+    };
+    inizializza();
+    return function() { attivo = false; };
+  }, [studente.id]);
+
+  const setLikertVal = function(id, valore) {
+    setLikert(function(prev) {
+      const nuovo = { ...prev };
+      // Toggle: ricliccare lo stesso valore lo deseleziona
+      nuovo[id] = (String(prev[id]) === String(valore)) ? "" : valore;
+      return nuovo;
+    });
+  };
+
+  const formatTs = function(iso) {
+    if (!iso) return "";
+    try {
+      const d = new Date(iso);
+      return d.toLocaleString("it-IT", {
+        day: "2-digit", month: "2-digit", year: "numeric",
+        hour: "2-digit", minute: "2-digit"
+      });
+    } catch (e) { return iso; }
+  };
+
+  const inviaDebriefing = async function() {
+    setConfermaModale(false);
+    setStatoFase("invio");
+    setErroreInvio("");
+    const payload = {
+      studenteId: studente.id,
+      nomeStudente: (studente.nome || "") + " " + (studente.cognome || ""),
+      paese: studente.paese,
+      wg: parseInt(studente.wg),
+      cambioPosizione: rispostaCambio,
+      // rispostaDomanda1 ospita la nuova domanda comune sull'ISO (vedi spec §4.2)
+      rispostaDomanda1: rispostaComune,
+      // rispostaDomanda2 resta nello schema per retrocompatibilità: mai popolato dal nuovo form
+      rispostaDomanda2: "",
+      rispostaRuolo: rispostaRuolo,
+      likert1: likert.likert1 === "" ? "" : parseInt(likert.likert1),
+      likert2: likert.likert2 === "" ? "" : parseInt(likert.likert2),
+      likert3: likert.likert3 === "" ? "" : parseInt(likert.likert3),
+      likert4: likert.likert4 === "" ? "" : parseInt(likert.likert4),
+    };
+    const res = await apiCall("salva_debriefing", payload);
+    if (res.ok) {
+      setTimestampInvioPrecedente(new Date().toISOString());
+      setStatoFase("inviato");
+    } else {
+      // Se il backend segnala invio già esistente, passiamo allo stato "gia_inviato"
+      const err = String(res.errore || "");
+      if (err.indexOf("già inviato") >= 0) {
+        // Ricarico il timestamp via verifica per la schermata di conferma
+        const ver = await apiCall("verifica_debriefing_inviato", { studenteId: studente.id });
+        if (ver.ok && ver.inviato) setTimestampInvioPrecedente(ver.timestamp || null);
+        setStatoFase("gia_inviato");
+      } else {
+        setStatoFase("compilazione");
+        setErroreInvio(err || "Errore sconosciuto durante il salvataggio.");
+      }
+    }
+  };
+
+  // ── Render condizionato ────────────────────────────────────────────────
+  if (statoFase === "caricamento") {
+    return <div className="loading">Verifica dello stato della fase di debriefing…</div>;
+  }
+
+  if (statoFase === "chiuso") {
+    return (
+      <div className="card" style={{ textAlign: "center", color: "var(--testo-light)", padding: 28 }}>
+        <div style={{ fontFamily: "Syne, sans-serif", fontWeight: 700, fontSize: 16, color: "var(--blu)", marginBottom: 8 }}>
+          Debriefing non ancora aperto
+        </div>
+        <div style={{ fontSize: 13, lineHeight: 1.5 }}>
+          Il debriefing non è ancora stato aperto dal docente. Aspetta l'apertura della fase: il tab tornerà disponibile non appena il docente attiverà il sondaggio post-plenaria.
+        </div>
+      </div>
+    );
+  }
+
+  if (statoFase === "gia_inviato" || statoFase === "inviato") {
+    return (
+      <div className="card" style={{ borderLeft: "4px solid var(--verde)" }}>
+        <div style={{ fontFamily: "Syne, sans-serif", fontWeight: 700, fontSize: 16, color: "var(--blu)", marginBottom: 10 }}>
+          ✓ Debriefing inviato
+        </div>
+        <div style={{ fontSize: 13, lineHeight: 1.55, color: "var(--testo)" }}>
+          {timestampInvioPrecedente ? (
+            <>Hai inviato il debriefing il <strong>{formatTs(timestampInvioPrecedente)}</strong>.</>
+          ) : (
+            <>Le tue risposte risultano già registrate.</>
+          )}
+          <br />
+          Le tue risposte sono state registrate e <strong>non sono modificabili</strong>.
+        </div>
+      </div>
+    );
+  }
+
+  if (statoFase === "errore") {
+    return (
+      <div className="card" style={{ borderLeft: "4px solid var(--rosso)" }}>
+        <div style={{ fontFamily: "Syne, sans-serif", fontWeight: 700, color: "var(--rosso)", marginBottom: 6 }}>
+          Errore di comunicazione
+        </div>
+        <div style={{ fontSize: 13 }}>{erroreInvio || "Errore sconosciuto."}</div>
+      </div>
+    );
+  }
+
+  // statoFase === "compilazione" oppure "invio"
+  const inInvio = statoFase === "invio";
+  return (
+    <div>
+      {confermaModale && (
+        <ModaleConferma
+          titolo="Inviare definitivamente il debriefing?"
+          messaggio="Stai per inviare il debriefing. Una volta inviato, le risposte non saranno più modificabili. Confermi?"
+          onConferma={inviaDebriefing}
+          onAnnulla={function() { setConfermaModale(false); }}
+        />
+      )}
+
+      <div style={{ marginBottom: 16 }}>
+        <div style={{ fontFamily: "Syne, sans-serif", fontWeight: 700, fontSize: 16, color: "var(--blu)" }}>
+          💬 Debriefing post-plenaria
+        </div>
+        <div style={{ fontSize: 12, color: "var(--testo-light)", marginTop: 2 }}>
+          {etichettaIntestazione}
+        </div>
+      </div>
+
+      {erroreInvio && (
+        <div style={{ background: "#fdecea", border: "1px solid var(--rosso)", borderLeft: "4px solid var(--rosso)", padding: 12, borderRadius: 4, marginBottom: 12, fontSize: 13 }}>
+          {erroreInvio}
+        </div>
+      )}
+
+      {/* Sezione 1 — Domanda chiusa: cambio voto */}
+      <div className="debrief-domanda">
+        <div className="debrief-domanda-testo">
+          {DOMANDE_DEBRIEFING[0].domanda}
+        </div>
+        {DOMANDE_DEBRIEFING[0].opzioni.map(function(op) {
+          const scelto = rispostaCambio === op;
+          return (
+            <div
+              key={op}
+              className={"debrief-opzione" + (scelto ? " scelta" : "")}
+              onClick={function() { if (!inInvio) setRispostaCambio(op); }}
+            >
+              <span style={{ fontFamily: "Syne, sans-serif", fontWeight: 700, color: scelto ? "var(--verde)" : "var(--testo-light)" }}>
+                {scelto ? "●" : "○"}
+              </span>
+              <span>{op}</span>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Sezione 2 — Domanda aperta comune sul funzionamento ISO */}
+      <div className="debrief-domanda">
+        <div className="debrief-domanda-testo">
+          {DOMANDE_DEBRIEFING[1].domanda}
+        </div>
+        <textarea
+          value={rispostaComune}
+          onChange={function(e) { setRispostaComune(e.target.value); }}
+          disabled={inInvio}
+          rows={8}
+          style={{
+            width: "100%", boxSizing: "border-box",
+            border: "1px solid var(--bordo)", borderRadius: 4, padding: 10,
+            fontFamily: "inherit", fontSize: 13, lineHeight: 1.5, resize: "vertical"
+          }}
+          placeholder="Scrivi qui la tua risposta…"
+        />
+      </div>
+
+      {/* Sezione 3 — Domanda aperta specifica di ruolo */}
+      <div className="debrief-domanda">
+        <div className="debrief-domanda-testo">
+          {isCapo ? "Domanda per il Delegato Capo" : "Domanda per l'Esperto WG " + studente.wg}
+        </div>
+        <div style={{ fontSize: 13, color: "var(--testo)", marginBottom: 8, lineHeight: 1.5 }}>
+          {domandaRuolo.domanda}
+        </div>
+        <textarea
+          value={rispostaRuolo}
+          onChange={function(e) { setRispostaRuolo(e.target.value); }}
+          disabled={inInvio}
+          rows={6}
+          style={{
+            width: "100%", boxSizing: "border-box",
+            border: "1px solid var(--bordo)", borderRadius: 4, padding: 10,
+            fontFamily: "inherit", fontSize: 13, lineHeight: 1.5, resize: "vertical"
+          }}
+          placeholder="Scrivi qui la tua risposta…"
+        />
+      </div>
+
+      {/* Sezione 4 — Scala Likert (4 item) */}
+      <div className="debrief-domanda">
+        <div className="debrief-domanda-testo">
+          Valutazione personale dell'esperienza (1 = Per niente d'accordo, 5 = Molto d'accordo)
+        </div>
+        {ITEM_LIKERT_DEBRIEFING.map(function(item) {
+          const val = likert[item.id];
+          return (
+            <div key={item.id} style={{ marginBottom: 14, paddingBottom: 10, borderBottom: "1px dashed var(--bordo)" }}>
+              <div style={{ fontSize: 13, color: "var(--testo)", marginBottom: 6 }}>{item.testo}</div>
+              <div className="likert-riga">
+                <span className="likert-etichetta">{LIKERT_ETICHETTE[1]}</span>
+                <span className="likert-pallini">
+                  {[1, 2, 3, 4, 5].map(function(v) {
+                    const scelto = String(val) === String(v);
+                    return (
+                      <button
+                        key={v}
+                        type="button"
+                        className={"likert-pallino" + (scelto ? " scelto" : "")}
+                        onClick={function() { if (!inInvio) setLikertVal(item.id, v); }}
+                        disabled={inInvio}
+                        aria-label={"Valore " + v + " per: " + item.testo}
+                      >{v}</button>
+                    );
+                  })}
+                </span>
+                <span className="likert-etichetta destra">{LIKERT_ETICHETTE[5]}</span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 16 }}>
+        <button
+          className="btn btn-primary"
+          disabled={inInvio}
+          onClick={function() { setConfermaModale(true); }}
+        >
+          {inInvio ? "Salvataggio in corso…" : "Invia definitivamente"}
+        </button>
+      </div>
+
+      <div style={{ marginTop: 10, fontSize: 11, color: "var(--testo-light)", textAlign: "right" }}>
+        Le risposte non sono modificabili dopo l'invio.
+      </div>
+    </div>
+  );
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // NWIP View e GLOSSARIO (condivisi)
 // ═══════════════════════════════════════════════════════════════════════════
@@ -3320,6 +3723,9 @@ function DocenteRisultato({ studenti, votiBackend }) {
       "voto_preliminare","voto_finale","voto_cambiato",
       "sintesi_posizione","motivazione_ballot",
       "interventi_plenaria","risposta_debrief_cambio","risposta_debrief_q1","risposta_debrief_q2",
+      // Nuovi campi v2: domanda di ruolo + 4 item Likert
+      "risposta_debrief_ruolo",
+      "likert_paese","likert_altri_wg","likert_squadra","likert_preparazione",
       "registrato","ultimo_accesso",
     ];
 
@@ -3341,6 +3747,8 @@ function DocenteRisultato({ studenti, votiBackend }) {
         dbrf.cambioPosizione || "",
         (dbrf.rispostaDomanda1 || "").replace(/[\r\n]+/g, " ").replace(/"/g, '""'),
         (dbrf.rispostaDomanda2 || "").replace(/[\r\n]+/g, " ").replace(/"/g, '""'),
+        (dbrf.rispostaRuolo    || "").replace(/[\r\n]+/g, " ").replace(/"/g, '""'),
+        dbrf.likert1 || "", dbrf.likert2 || "", dbrf.likert3 || "", dbrf.likert4 || "",
         s.registrato || "", s.ultimoAccesso || "",
       ];
     });
@@ -3409,7 +3817,7 @@ function DocenteRisultato({ studenti, votiBackend }) {
           <button className="btn btn-verde" onClick={esportaCsvValutazione}>📊 CSV valutazione arricchito</button>
         </div>
         <div style={{ marginTop: 12, padding: 10, background: "#f5f2eb", borderRadius: 4, fontSize: 11, color: "var(--testo-light)", lineHeight: 1.55 }}>
-          <strong>CSV valutazione — campi inclusi:</strong> anagrafica, paese/WG/ruolo, sezioni WG visitate, stato di completamento, voto preliminare e finale con flag di cambio (solo Delegati Capo), sintesi di posizione pubblicata, motivazione del ballot individuale, numero di interventi in plenaria, risposte al debriefing, timestamp di registrazione e ultimo accesso. Separatore «;» e BOM UTF-8 per compatibilità con Excel italiano.
+          <strong>CSV valutazione — campi inclusi:</strong> anagrafica, paese/WG/ruolo, sezioni WG visitate, stato di completamento, voto preliminare e finale con flag di cambio (solo Delegati Capo), sintesi di posizione pubblicata, motivazione del ballot individuale, numero di interventi in plenaria, risposte al debriefing (domanda chiusa cambio voto, domanda comune sull'ISO in <code>risposta_debrief_q1</code>, domanda di ruolo Capo/Esperto in <code>risposta_debrief_ruolo</code>, 4 item Likert 1-5), timestamp di registrazione e ultimo accesso. Il campo <code>risposta_debrief_q2</code> è mantenuto a fini storici e resta vuoto nelle nuove sessioni. Separatore «;» e BOM UTF-8 per compatibilità con Excel italiano.
         </div>
       </div>
     </div>
@@ -3685,11 +4093,16 @@ function DocenteDiagnostica() {
 function DocenteDebriefing() {
   const [risposte, setRisposte] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [statoFase, setStatoFase] = useState({ aperto: false, apertoTimestamp: null });
+  const [erroreToggle, setErroreToggle] = useState("");
+  const [confermaChiusura, setConfermaChiusura] = useState(false);
 
   const carica = async function() {
     setLoading(true);
     const res = await apiCall("get_debriefing", {});
     if (res.ok) setRisposte(res.debriefing || []);
+    const sf = await apiCall("stato_debriefing", {});
+    if (sf.ok) setStatoFase({ aperto: !!sf.aperto, apertoTimestamp: sf.apertoTimestamp || null });
     setLoading(false);
   };
 
@@ -3699,15 +4112,95 @@ function DocenteDebriefing() {
     return function() { clearInterval(t); };
   }, []);
 
-  // Statistiche cambio posizione
+  const formatTs = function(iso) {
+    if (!iso) return "";
+    try {
+      const d = new Date(iso);
+      return d.toLocaleString("it-IT", {
+        day: "2-digit", month: "2-digit", year: "numeric",
+        hour: "2-digit", minute: "2-digit"
+      });
+    } catch (e) { return iso; }
+  };
+
+  const apri = async function() {
+    setErroreToggle("");
+    const res = await apiCall("apri_debriefing", {});
+    if (!res.ok) { setErroreToggle(res.errore || "Errore apertura fase."); return; }
+    setStatoFase({ aperto: true, apertoTimestamp: res.apertoTimestamp || new Date().toISOString() });
+  };
+
+  const chiudi = async function() {
+    setErroreToggle("");
+    setConfermaChiusura(false);
+    const res = await apiCall("chiudi_debriefing", {});
+    if (!res.ok) { setErroreToggle(res.errore || "Errore chiusura fase."); return; }
+    setStatoFase({ aperto: false, apertoTimestamp: statoFase.apertoTimestamp });
+  };
+
+  // ── Statistiche cambio posizione (domanda chiusa) ─────────────────────────
   const stats = { "Sì, ho cambiato voto": 0, "No, stesso voto": 0, "No, ma stavo per farlo": 0 };
   risposte.forEach(function(r) { if (r.cambioPosizione && stats[r.cambioPosizione] !== undefined) stats[r.cambioPosizione]++; });
   const tot = risposte.length;
 
-  const domande = DOMANDE_DEBRIEFING.filter(function(d) { return d.tipo === "aperta"; });
+  // ── Statistiche Likert: media + distribuzione 1-5 per ogni item ───────────
+  const likertStats = ITEM_LIKERT_DEBRIEFING.map(function(item) {
+    const valori = risposte
+      .map(function(r) { return r[item.id]; })
+      .map(function(v) { return parseInt(v); })
+      .filter(function(v) { return !isNaN(v) && v >= 1 && v <= 5; });
+    const distribuzione = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
+    valori.forEach(function(v) { distribuzione[v]++; });
+    const media = valori.length > 0
+      ? valori.reduce(function(a, b) { return a + b; }, 0) / valori.length
+      : null;
+    return { id: item.id, testo: item.testo, valori: valori, distribuzione: distribuzione, media: media, n: valori.length };
+  });
+
+  // ── Risposte di ruolo separate per Capo / Esperto ─────────────────────────
+  const risposteCapo = risposte
+    .filter(function(r) { return parseInt(r.wg) === 4 && r.rispostaRuolo && String(r.rispostaRuolo).trim().length > 0; });
+  const risposteEsperti = risposte
+    .filter(function(r) { return parseInt(r.wg) !== 4 && r.rispostaRuolo && String(r.rispostaRuolo).trim().length > 0; });
+
+  // ── Risposte alla domanda comune (rispostaDomanda1) ───────────────────────
+  const risposteComune = risposte
+    .filter(function(r) { return r.rispostaDomanda1 && String(r.rispostaDomanda1).trim().length > 0; });
+
+  // ── Risposte storiche (rispostaDomanda2 da sessioni precedenti) ───────────
+  const risposteStoriche = risposte
+    .filter(function(r) { return r.rispostaDomanda2 && String(r.rispostaDomanda2).trim().length > 0; });
+
+  // ── Helper di rendering per un singolo blocco di risposte aperte ──────────
+  // `campo` è il nome della colonna da renderizzare (es. "rispostaDomanda1",
+  // "rispostaRuolo"). Passarlo esplicitamente evita ambiguità quando una stessa
+  // riga ha valori in più colonne (es. Capo che ha risposto sia alla comune sia
+  // alla domanda di ruolo).
+  const renderRispostaAperta = function(campo) {
+    return function(r, i) {
+      const p = PAESI.filter(function(x) { return x.id === r.paese; })[0];
+      return (
+        <div key={i} style={{ padding: "12px 14px", background: "var(--bg)", borderLeft: "3px solid var(--blu-light)", borderRadius: "0 4px 4px 0", marginBottom: 8 }}>
+          <div style={{ fontSize: 11, color: "var(--testo-light)", fontFamily: "Syne, sans-serif", fontWeight: 600, marginBottom: 4 }}>
+            {p ? p.emoji + " " + p.nome : r.paese} · WG {r.wg} · {r.nomeStudente}
+          </div>
+          <div style={{ fontSize: 13, lineHeight: 1.55, whiteSpace: "pre-wrap" }}>{r[campo]}</div>
+        </div>
+      );
+    };
+  };
 
   return (
     <div>
+      {confermaChiusura && (
+        <ModaleConferma
+          titolo="Chiudere la fase di debriefing?"
+          messaggio="Chiudendo la fase, il tab «Debriefing» scompare dalla dashboard di tutti gli studenti, anche di chi non ha ancora compilato. Le risposte già inviate restano integre e visibili in questo pannello. La fase può essere riaperta successivamente."
+          onConferma={chiudi}
+          onAnnulla={function() { setConfermaChiusura(false); }}
+        />
+      )}
+
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
         <div>
           <div style={{ fontFamily: "Syne, sans-serif", fontWeight: 700, fontSize: 16, color: "var(--blu)" }}>💬 Debriefing post-plenaria</div>
@@ -3716,12 +4209,54 @@ function DocenteDebriefing() {
         <button className="btn btn-ghost btn-sm" onClick={carica}>🔄 Aggiorna</button>
       </div>
 
+      {/* ── Toggle apri/chiudi fase ─────────────────────────────────────── */}
+      <div className="card" style={{ borderLeft: statoFase.aperto ? "4px solid var(--verde)" : "4px solid #aaa" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+          <div style={{ flex: 1, minWidth: 240 }}>
+            {statoFase.aperto ? (
+              <>
+                <div style={{ fontFamily: "Syne, sans-serif", fontWeight: 700, fontSize: 14, color: "var(--verde)" }}>
+                  🟢 Debriefing aperto
+                </div>
+                <div style={{ fontSize: 12, color: "var(--testo-light)", marginTop: 4 }}>
+                  Aperto {statoFase.apertoTimestamp ? "il " + formatTs(statoFase.apertoTimestamp) : ""} — gli studenti possono compilare il sondaggio dalla loro dashboard.
+                </div>
+              </>
+            ) : (
+              <>
+                <div style={{ fontFamily: "Syne, sans-serif", fontWeight: 700, fontSize: 14, color: "var(--testo-light)" }}>
+                  ⚪ Debriefing chiuso
+                </div>
+                <div style={{ fontSize: 12, color: "var(--testo-light)", marginTop: 4 }}>
+                  Il tab «Debriefing» non è visibile agli studenti. Apri la fase quando vuoi raccogliere il sondaggio post-plenaria.
+                </div>
+              </>
+            )}
+          </div>
+          {statoFase.aperto ? (
+            <button className="btn btn-secondary" onClick={function() { setConfermaChiusura(true); }}>
+              Chiudi debriefing
+            </button>
+          ) : (
+            <button className="btn btn-primary" onClick={apri}>
+              Apri debriefing
+            </button>
+          )}
+        </div>
+        {erroreToggle && (
+          <div style={{ marginTop: 10, padding: 8, background: "#fdecea", border: "1px solid var(--rosso)", borderRadius: 4, fontSize: 12, color: "var(--rosso)" }}>
+            {erroreToggle}
+          </div>
+        )}
+      </div>
+
       {loading ? <div className="loading">Carico risposte...</div> : tot === 0 ? (
         <div className="card" style={{ textAlign: "center", color: "var(--testo-light)" }}>
-          Nessuna risposta al debriefing ancora inviata. Gli studenti possono compilare il debriefing dalla loro dashboard al termine della plenaria.
+          Nessuna risposta al debriefing ancora inviata. Gli studenti possono compilare il debriefing dalla loro dashboard quando la fase è aperta.
         </div>
       ) : (
         <>
+          {/* ── Cambio di posizione ─────────────────────────────────────── */}
           <div className="card">
             <div className="card-title">📊 Cambio di posizione tra voto preliminare e finale</div>
             {Object.entries(stats).map(function(entry) {
@@ -3739,33 +4274,93 @@ function DocenteDebriefing() {
             })}
           </div>
 
-          {domande.map(function(d, di) {
-            const risDomanda = risposte.map(function(r) {
-              return { id: r.studenteId, nome: r.nomeStudente, paese: r.paese, wg: r.wg, risposta: r["rispostaDomanda" + (di + 1)] };
-            }).filter(function(r) { return r.risposta && r.risposta.trim().length > 0; });
-
-            return (
-              <div key={d.id} className="card">
-                <div className="card-title">Q{di + 1}. {d.domanda}</div>
-                <div className="card-sub">{risDomanda.length} risposte</div>
-                {risDomanda.length === 0 ? (
-                  <div style={{ fontSize: 13, color: "var(--testo-light)", fontStyle: "italic" }}>Nessuna risposta per questa domanda.</div>
-                ) : (
-                  risDomanda.map(function(r, i) {
-                    const p = PAESI.filter(function(x) { return x.id === r.paese; })[0];
+          {/* ── Statistiche scala Likert ────────────────────────────────── */}
+          <div className="card">
+            <div className="card-title">📈 Valutazione personale (scala Likert 1-5)</div>
+            <div className="card-sub">Media calcolata escludendo le risposte vuote.</div>
+            {likertStats.map(function(st) {
+              const maxConteggio = Math.max(1, st.distribuzione[1], st.distribuzione[2], st.distribuzione[3], st.distribuzione[4], st.distribuzione[5]);
+              return (
+                <div key={st.id} style={{ marginBottom: 16, paddingBottom: 12, borderBottom: "1px dashed var(--bordo)" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8, marginBottom: 8 }}>
+                    <div style={{ fontSize: 13, color: "var(--testo)", flex: 1 }}>{st.testo}</div>
+                    <div style={{ fontFamily: "Syne, sans-serif", fontWeight: 700, fontSize: 13, color: "var(--blu)", whiteSpace: "nowrap" }}>
+                      {st.media !== null ? "media " + st.media.toFixed(2) : "media n/d"} <span style={{ color: "var(--testo-light)", fontWeight: 400, fontSize: 11 }}>(n = {st.n})</span>
+                    </div>
+                  </div>
+                  {[1, 2, 3, 4, 5].map(function(v) {
+                    const c = st.distribuzione[v];
+                    const w = (c / maxConteggio) * 100;
                     return (
-                      <div key={i} style={{ padding: "12px 14px", background: "var(--bg)", borderLeft: "3px solid var(--blu-light)", borderRadius: "0 4px 4px 0", marginBottom: 8 }}>
-                        <div style={{ fontSize: 11, color: "var(--testo-light)", fontFamily: "Syne, sans-serif", fontWeight: 600, marginBottom: 4 }}>
-                          {p ? p.emoji + " " + p.nome : r.paese} · WG {r.wg} · {r.nome}
-                        </div>
-                        <div style={{ fontSize: 13, lineHeight: 1.55 }}>{r.risposta}</div>
+                      <div key={v} className="likert-stat-riga">
+                        <span className="likert-stat-label">{v}</span>
+                        <div className="likert-stat-barra"><div className="likert-stat-fill" style={{ width: w + "%" }} /></div>
+                        <span className="likert-stat-conteggio">{c}</span>
                       </div>
                     );
-                  })
-                )}
+                  })}
+                </div>
+              );
+            })}
+          </div>
+
+          {/* ── Risposte alla domanda comune (rispostaDomanda1) ─────────── */}
+          <div className="card">
+            <div className="card-title">Risposte alla domanda comune sul funzionamento ISO</div>
+            <div className="card-sub">{risposteComune.length} risposte · {DOMANDE_DEBRIEFING[1].domanda.slice(0, 110)}…</div>
+            {risposteComune.length === 0 ? (
+              <div style={{ fontSize: 13, color: "var(--testo-light)", fontStyle: "italic" }}>Nessuna risposta per questa domanda.</div>
+            ) : (
+              risposteComune.map(renderRispostaAperta("rispostaDomanda1"))
+            )}
+          </div>
+
+          {/* ── Risposte di ruolo: Delegati Capo ─────────────────────────── */}
+          <div className="card">
+            <div className="card-title">Risposte dei Delegati Capo</div>
+            <div className="card-sub">
+              {risposteCapo.length} risposte · {DOMANDA_RUOLO_DEBRIEFING.capo.domanda}
+            </div>
+            {risposteCapo.length === 0 ? (
+              <div style={{ fontSize: 13, color: "var(--testo-light)", fontStyle: "italic" }}>Nessuna risposta dai Delegati Capo.</div>
+            ) : (
+              risposteCapo.map(renderRispostaAperta("rispostaRuolo"))
+            )}
+          </div>
+
+          {/* ── Risposte di ruolo: Esperti WG ────────────────────────────── */}
+          <div className="card">
+            <div className="card-title">Risposte degli Esperti WG</div>
+            <div className="card-sub">
+              {risposteEsperti.length} risposte · {DOMANDA_RUOLO_DEBRIEFING.esperto.domanda}
+            </div>
+            {risposteEsperti.length === 0 ? (
+              <div style={{ fontSize: 13, color: "var(--testo-light)", fontStyle: "italic" }}>Nessuna risposta dagli Esperti WG.</div>
+            ) : (
+              risposteEsperti.map(renderRispostaAperta("rispostaRuolo"))
+            )}
+          </div>
+
+          {/* ── Risposte storiche (rispostaDomanda2 da sessioni precedenti) ── */}
+          {risposteStoriche.length > 0 && (
+            <div className="card" style={{ borderLeft: "3px solid #aaa" }}>
+              <div className="card-title">Risposte storiche (sessioni precedenti)</div>
+              <div className="card-sub">
+                Contenuto presente in <code>rispostaDomanda2</code> di righe inserite prima della v2 del debriefing. Conservato a fini archivistici.
               </div>
-            );
-          })}
+              {risposteStoriche.map(function(r, i) {
+                const p = PAESI.filter(function(x) { return x.id === r.paese; })[0];
+                return (
+                  <div key={i} style={{ padding: "12px 14px", background: "#fafafa", borderLeft: "3px solid #aaa", borderRadius: "0 4px 4px 0", marginBottom: 8 }}>
+                    <div style={{ fontSize: 11, color: "var(--testo-light)", fontFamily: "Syne, sans-serif", fontWeight: 600, marginBottom: 4 }}>
+                      {p ? p.emoji + " " + p.nome : r.paese} · WG {r.wg} · {r.nomeStudente}
+                    </div>
+                    <div style={{ fontSize: 13, lineHeight: 1.55, whiteSpace: "pre-wrap" }}>{r.rispostaDomanda2}</div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </>
       )}
     </div>
